@@ -1,4 +1,4 @@
-"""Fast one-class MobileNetV2 anomaly detector (no autoencoder)."""
+"""Convolutional autoencoder for mel-spectrogram anomaly detection."""
 
 from pathlib import Path
 
@@ -6,94 +6,92 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models import mobilenet_v2
 
-from src.config import BASE_CHANNELS, LATENT_DIM, LATENT_L1
-
-
-def _init_weights(module):
-    if isinstance(module, (nn.Conv2d, nn.Linear)):
-        nn.init.kaiming_normal_(module.weight, nonlinearity="leaky_relu")
-        if module.bias is not None:
-            nn.init.zeros_(module.bias)
+from src.config import BASE_CHANNELS, LATENT_DIM
 
 
 class ConvAutoencoder(nn.Module):
-    """
-    Backward-compatible class name.
-    Actually a one-class anomaly scorer trained with pseudo anomalies.
+    """Convolutional autoencoder for mel-spectrogram anomaly detection.
+    Trained with L1 reconstruction loss on normal data.
+    Anomaly score = reconstruction error (higher = more anomalous).
     """
 
     def __init__(self, latent_dim: int = LATENT_DIM, base_channels: int = BASE_CHANNELS):
         super().__init__()
-        c = max(16, int(base_channels))
-        self.latent_dim = int(latent_dim)
-        self.base_channels = c
+        c = max(8, int(base_channels))
 
-        width_mult = max(0.35, min(1.0, c / 32.0))
-        backbone = mobilenet_v2(weights=None, width_mult=width_mult)
-        first_out = int(backbone.features[0][0].out_channels)
-        first_conv = nn.Conv2d(1, first_out, kernel_size=3, stride=2, padding=1, bias=False)
-        with torch.no_grad():
-            first_conv.weight.copy_(backbone.features[0][0].weight.mean(dim=1, keepdim=True))
-        backbone.features[0][0] = first_conv
-        self.encoder = backbone.features
+        self.enc1 = self._conv_block(1, c)
+        self.enc2 = self._conv_block(c, c * 2)
+        self.enc3 = self._conv_block(c * 2, c * 4)
+        self.enc4 = self._conv_block(c * 4, c * 8)
+
+        self.dec4 = self._up_block(c * 8, c * 4)
+        self.dec3 = self._up_block(c * 4, c * 2)
+        self.dec2 = self._up_block(c * 2, c)
+        self.dec1 = nn.Sequential(
+            nn.ConvTranspose2d(c, 1, 4, 2, 1),
+            nn.Sigmoid(),
+        )
+
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        last_ch = self.encoder[-1][0].out_channels
-        self.proj = nn.Linear(last_ch, self.latent_dim, bias=False)
-        self.norm = nn.LayerNorm(self.latent_dim)
-        self.head = nn.Linear(self.latent_dim, 1)
+        self.proj = nn.Linear(c * 8, int(latent_dim))
+        self.norm = nn.LayerNorm(int(latent_dim))
 
-        self.apply(_init_weights)
+    @staticmethod
+    def _conv_block(in_ch, out_ch, k=4, s=2, p=1):
+        return nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, k, s, p, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.LeakyReLU(0.2),
+        )
+
+    @staticmethod
+    def _up_block(in_ch, out_ch, k=4, s=2, p=1):
+        return nn.Sequential(
+            nn.ConvTranspose2d(in_ch, out_ch, k, s, p, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.LeakyReLU(0.2),
+        )
+
+    @staticmethod
+    def _pad_time(x):
+        T = x.shape[-1]
+        pad = (16 - T % 16) % 16
+        if pad > 0:
+            x = F.pad(x, (0, pad))
+        return x, pad
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
-        h = self.encoder(x)
+        """Bottleneck features for defect classifier."""
+        x, _ = self._pad_time(x)
+        h = self.enc1(x)
+        h = self.enc2(h)
+        h = self.enc3(h)
+        h = self.enc4(h)
         h = self.pool(h).flatten(1)
         z = self.proj(h)
         z = self.norm(z)
         return z
 
-    def forward(self, x: torch.Tensor):
-        z = self.encode(x)
-        logits = self.head(z).squeeze(1)
-        return logits, z
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Reconstruct input mel-spectrogram."""
+        x, pad = self._pad_time(x)
+        z = self.enc1(x)
+        z = self.enc2(z)
+        z = self.enc3(z)
+        z = self.enc4(z)
+        x_hat = self.dec4(z)
+        x_hat = self.dec3(x_hat)
+        x_hat = self.dec2(x_hat)
+        x_hat = self.dec1(x_hat)
+        if pad > 0:
+            x_hat = x_hat[:, :, :, :-pad]
+        return x_hat
 
     def reconstruction_error(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Kept for compatibility with existing evaluation/check code.
-        Returns anomaly score in [0, 1], higher = more anomalous.
-        """
-        logits, _ = self(x)
-        return torch.sigmoid(logits)
-
-
-def _make_pseudo_anomaly(x: torch.Tensor) -> torch.Tensor:
-    """Strong corruption to create pseudo-anomalies from normal spectrograms."""
-    out = x.clone()
-    n, _, f, t = out.shape
-    dev = x.device
-
-    # Random frequency mask (fully vectorized)
-    mask_f = torch.randint(low=max(2, f // 16), high=max(3, f // 4), size=(n, 1, 1, 1), device=dev)
-    max_start_f = (f - mask_f.float()).clamp(min=1)
-    start_f = (torch.rand(n, 1, 1, 1, device=dev) * max_start_f).long()
-    ar_f = torch.arange(f, device=dev)[None, None, :, None]
-    fmask = (ar_f >= start_f) & (ar_f < start_f + mask_f)
-    out = torch.where(fmask, torch.tensor(0.0, device=dev), out)
-
-    # Random time mask (fully vectorized)
-    mask_t = torch.randint(low=max(2, t // 16), high=max(3, t // 4), size=(n, 1, 1, 1), device=dev)
-    max_start_t = (t - mask_t.float()).clamp(min=1)
-    start_t = (torch.rand(n, 1, 1, 1, device=dev) * max_start_t).long()
-    ar_t = torch.arange(t, device=dev)[None, None, None, :]
-    tmask = (ar_t >= start_t) & (ar_t < start_t + mask_t)
-    out = torch.where(tmask, torch.tensor(0.0, device=dev), out)
-
-    # Additive noise + random gain
-    noise = 0.1 * torch.randn_like(out)
-    gain = torch.empty((n, 1, 1, 1), device=dev).uniform_(0.7, 1.4)
-    out = torch.clamp(out * gain + noise, 0.0, 1.0)
-    return out
+        """Per-sample L1 reconstruction error as anomaly score."""
+        x_hat = self.forward(x)
+        return torch.mean(torch.abs(x - x_hat), dim=(1, 2, 3))
 
 
 def train_autoencoder(
@@ -107,36 +105,21 @@ def train_autoencoder(
     save_path: Path | None = None,
     cb=None,
     use_amp: bool = False,
-    latent_l1: float = LATENT_L1,
     stop_event=None,
 ):
-    """Train one-class scorer via normal-vs-pseudo-anomaly objective."""
+    """Train ConvAutoencoder with L1 reconstruction loss on normal data."""
     model = model.to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=max(3, min(10, patience // 2))
     )
-    bce = nn.BCEWithLogitsLoss()
+    loss_fn = nn.L1Loss()
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
     max_grad_norm = 5.0
 
     best_val_loss = float("inf")
     wait = 0
     history = {"train_loss": [], "val_loss": [], "lr": []}
-
-    def _step_loss(x_batch: torch.Tensor):
-        pos_logits, pos_z = model(x_batch)
-        x_neg = _make_pseudo_anomaly(x_batch)
-        neg_logits, neg_z = model(x_neg)
-
-        y_pos = torch.zeros_like(pos_logits)
-        y_neg = torch.ones_like(neg_logits)
-        cls_loss = bce(pos_logits, y_pos) + bce(neg_logits, y_neg)
-
-        # Encourage separation between normal and pseudo-anomaly scores.
-        margin = F.relu(0.3 + torch.sigmoid(pos_logits) - torch.sigmoid(neg_logits)).mean()
-        reg = latent_l1 * (pos_z.abs().mean() + neg_z.abs().mean())
-        return cls_loss + 0.5 * margin + reg
 
     for epoch in range(1, epochs + 1):
         if stop_event and stop_event.is_set():
@@ -154,14 +137,16 @@ def train_autoencoder(
 
             if use_amp:
                 with torch.amp.autocast("cuda"):
-                    loss = _step_loss(x)
+                    x_hat = model(x)
+                    loss = loss_fn(x_hat, x)
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                 scaler.step(optimizer)
                 scaler.update()
             else:
-                loss = _step_loss(x)
+                x_hat = model(x)
+                loss = loss_fn(x_hat, x)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                 optimizer.step()
@@ -175,9 +160,11 @@ def train_autoencoder(
                 x = x.to(device, non_blocking=True)
                 if use_amp:
                     with torch.amp.autocast("cuda"):
-                        v_loss = _step_loss(x)
+                        x_hat = model(x)
+                        v_loss = loss_fn(x_hat, x)
                 else:
-                    v_loss = _step_loss(x)
+                    x_hat = model(x)
+                    v_loss = loss_fn(x_hat, x)
                 val_losses.append(float(v_loss.item()))
 
         t_loss = float(np.mean(train_losses))
@@ -192,7 +179,7 @@ def train_autoencoder(
         if cb:
             cb(epoch, t_loss, v_loss)
         else:
-            print(f"Epoch {epoch:3d} | train={t_loss:.4f} | val={v_loss:.4f} | lr={current_lr:.2e}")
+            print(f"Epoch {epoch:3d} | train={t_loss:.6f} | val={v_loss:.6f} | lr={current_lr:.2e}")
 
         if v_loss < best_val_loss:
             best_val_loss = v_loss

@@ -18,12 +18,11 @@ MACHINE_TYPES = ["fan", "pump", "slider", "valve"]
 # SNR levels available in MIMII
 SNR_LEVELS = [-6, 0, 6]
 
-# MobileNetV2 one-class speed profile
+# ConvAutoencoder defaults
 LATENT_DIM = 8
-LATENT_L1 = 7e-4
-BATCH_SIZE = 96
-BASE_CHANNELS = 24
-LEARNING_RATE = 3e-4
+BATCH_SIZE = 64
+BASE_CHANNELS = 32
+LEARNING_RATE = 1e-4
 EPOCHS = 90
 PATIENCE = 12
 

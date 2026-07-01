@@ -50,7 +50,7 @@ DEPLOY_TOKEN = os.environ.get("DEPLOY_TOKEN", "").strip()
 from src.config import (
     MODEL_DIR, DATA_DIR, MACHINE_TYPES, RESULTS_DIR,
     BATCH_SIZE, EPOCHS, LEARNING_RATE, PATIENCE, ANOMALY_QUANTILE,
-    THRESHOLD_METHOD, THRESHOLD_TARGET_FPR, THRESHOLD_MAD_K, LATENT_DIM, LATENT_L1, BASE_CHANNELS,
+    THRESHOLD_METHOD, THRESHOLD_TARGET_FPR, THRESHOLD_MAD_K, LATENT_DIM, BASE_CHANNELS,
     BASELINE_N_MELS, BASELINE_FRAMES, BASELINE_N_FFT, BASELINE_HOP_LENGTH, BASELINE_POWER,
 )
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -78,7 +78,6 @@ state = {
         "threshold_target_fpr": THRESHOLD_TARGET_FPR,
         "threshold_mad_k": THRESHOLD_MAD_K,
         "latent_dim": LATENT_DIM,
-        "latent_l1": LATENT_L1,
         "base_channels": BASE_CHANNELS,
         "model_backend": "mobilenet",
     },
@@ -456,7 +455,6 @@ def train():
     train_threshold_method = (data.get("threshold_method", THRESHOLD_METHOD) or THRESHOLD_METHOD).strip().lower()
     train_target_fpr = float(data.get("threshold_target_fpr", THRESHOLD_TARGET_FPR))
     train_mad_k = float(data.get("threshold_mad_k", THRESHOLD_MAD_K))
-    train_latent_l1 = float(data.get("latent_l1", LATENT_L1))
     train_latent_dim = int(data.get("latent_dim", state["train_config"].get("latent_dim", LATENT_DIM)))
     train_base_channels = int(data.get("base_channels", state["train_config"].get("base_channels", BASE_CHANNELS)))
     model_backend = (data.get("model_backend") or state["train_config"].get("model_backend") or "mobilenet").strip().lower()
@@ -480,8 +478,6 @@ def train():
         return jsonify({"error": "threshold_target_fpr must be in (0, 1)"}), 400
     if train_mad_k <= 0 or train_mad_k > 20:
         return jsonify({"error": "threshold_mad_k must be in (0, 20]"}), 400
-    if train_latent_l1 <= 0 or train_latent_l1 > 1:
-        return jsonify({"error": "latent_l1 must be in (0, 1]"}), 400
     if train_latent_dim < 4 or train_latent_dim > 256:
         return jsonify({"error": "latent_dim must be in [4, 256]"}), 400
     if train_base_channels < 8 or train_base_channels > 256:
@@ -497,7 +493,6 @@ def train():
         "threshold_target_fpr": train_target_fpr,
         "threshold_mad_k": train_mad_k,
         "latent_dim": train_latent_dim,
-        "latent_l1": train_latent_l1,
         "base_channels": train_base_channels,
         "model_backend": model_backend,
     }
@@ -758,7 +753,6 @@ def train():
 
             total_params = sum(p.numel() for p in model.parameters())
             log(f"ConvAutoencoder  latent_dim={train_latent_dim}  base_channels={train_base_channels} "
-                f"latent_l1={train_latent_l1:g}  "
                 f"params={total_params:,}  training on {device}…")
             state["progress"] = 18
 
@@ -778,7 +772,7 @@ def train():
                 model, train_loader, val_loader,
                 epochs=train_epochs, lr=train_lr, patience=train_patience,
                 device=device, save_path=save_path, cb=epoch_cb, use_amp=use_amp,
-                latent_l1=train_latent_l1, stop_event=_stop_event,
+                stop_event=_stop_event,
             )
             state["progress"] = 80
             if history["train_loss"] and history["val_loss"]:
@@ -888,7 +882,6 @@ def train():
                     "threshold_target_fpr": train_target_fpr,
                     "threshold_mad_k": train_mad_k,
                     "latent_dim": train_latent_dim,
-                    "latent_l1": train_latent_l1,
                     "base_channels": train_base_channels,
                 },
                 "report":       classification_report(test_labels, preds,
@@ -1018,7 +1011,6 @@ def tune():
                 latent_dim = trial.suggest_categorical("latent_dim", [8, 16, 24])
                 base_channels = trial.suggest_categorical("base_channels", [32, 64])
                 lr = trial.suggest_float("learning_rate", 1e-5, 5e-4, log=True)
-                latent_l1 = trial.suggest_float("latent_l1", 5e-4, 1e-2, log=True)
                 mad_k = trial.suggest_float("threshold_mad_k", 1.5, 3.5)
                 q = trial.suggest_float("anomaly_quantile", 0.85, 0.99)
                 method = trial.suggest_categorical("threshold_method", ["mad", "quantile"])
@@ -1039,7 +1031,6 @@ def tune():
                         model, train_loader, val_loader_cache,
                         epochs=trial_epochs, lr=lr, patience=trial_patience,
                         device=device, save_path=None, cb=epoch_cb, use_amp=use_amp,
-                        latent_l1=latent_l1,
                     )
 
                     threshold = compute_threshold(
@@ -1111,7 +1102,6 @@ def tune():
                 "threshold_target_fpr": threshold_target_fpr,
                 "threshold_mad_k": best_mad_k,
                 "latent_dim": int(best_params.get("latent_dim", base_train_cfg.get("latent_dim", LATENT_DIM))),
-                "latent_l1": float(best_params.get("latent_l1", base_train_cfg.get("latent_l1", LATENT_L1))),
                 "base_channels": int(best_params.get("base_channels", base_train_cfg.get("base_channels", BASE_CHANNELS))),
             })
 
@@ -1208,20 +1198,17 @@ def autopilot():
                 if round_idx == 1:
                     latent_candidates = [8, 16, 24]
                     channel_candidates = [32, 64]
-                    l1_low, l1_high = 5e-4, 1e-2
                 else:
                     prev = best_round["best_params"]
                     base_latent = int(prev.get("latent_dim", 16))
                     base_ch = int(prev.get("base_channels", 32))
                     latent_candidates = sorted(set([max(8, base_latent // 2), base_latent, min(48, base_latent * 2)]))
                     channel_candidates = sorted(set([max(16, base_ch // 2), base_ch, min(128, base_ch * 2)]))
-                    l1_low, l1_high = 1e-4, 2e-2
 
                 def objective(trial):
                     latent_dim = trial.suggest_categorical("latent_dim", latent_candidates)
                     base_channels = trial.suggest_categorical("base_channels", channel_candidates)
                     lr = trial.suggest_float("learning_rate", 1e-5, 7e-4, log=True)
-                    latent_l1 = trial.suggest_float("latent_l1", l1_low, l1_high, log=True)
                     method = trial.suggest_categorical("threshold_method", ["mad", "quantile"])
                     mad_k = trial.suggest_float("threshold_mad_k", 1.5, 4.0)
                     q = trial.suggest_float("anomaly_quantile", 0.80, 0.99)
@@ -1240,7 +1227,7 @@ def autopilot():
                             model, train_loader, val_loader,
                             epochs=trial_epochs, lr=lr, patience=max(5, trial_epochs // 4),
                             device=device, save_path=None, cb=epoch_cb,
-                            use_amp=(str(device) == "cuda"), latent_l1=latent_l1,
+                            use_amp=(str(device) == "cuda"),
                         )
 
                         threshold = compute_threshold(
@@ -1305,7 +1292,6 @@ def autopilot():
                     save_path=save_path,
                     cb=lambda e, tl, vl: None,
                     use_amp=(str(device) == "cuda"),
-                    latent_l1=float(best_params.get("latent_l1", state["train_config"].get("latent_l1", LATENT_L1))),
                 )
                 threshold = compute_threshold(
                     model, val_loader, device,
@@ -1354,7 +1340,6 @@ def autopilot():
                     "threshold_method": best_params.get("threshold_method", state["train_config"]["threshold_method"]),
                     "threshold_mad_k": float(best_params.get("threshold_mad_k", state["train_config"]["threshold_mad_k"])),
                     "latent_dim": int(best_params.get("latent_dim", state["train_config"]["latent_dim"])),
-                    "latent_l1": float(best_params.get("latent_l1", state["train_config"]["latent_l1"])),
                     "base_channels": int(best_params.get("base_channels", state["train_config"]["base_channels"])),
                 })
 

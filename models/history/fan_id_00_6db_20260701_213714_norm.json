@@ -1,1 +1,0 @@
-{"backend": "mimii_baseline", "n_mels": 64, "frames": 5, "n_fft": 1024, "hop_length": 512, "power": 2.0, "input_dim": 320}
