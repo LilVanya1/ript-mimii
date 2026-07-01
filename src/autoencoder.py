@@ -30,7 +30,8 @@ class ConvAutoencoder(nn.Module):
         self.latent_dim = int(latent_dim)
         self.base_channels = c
 
-        backbone = mobilenet_v2(weights=None, width_mult=max(0.35, min(1.0, c / 32.0)))
+        width_mult = max(0.35, min(1.0, c / 32.0))
+        backbone = mobilenet_v2(weights=None, width_mult=width_mult)
         first_out = int(backbone.features[0][0].out_channels)
         first_conv = nn.Conv2d(1, first_out, kernel_size=3, stride=2, padding=1, bias=False)
         with torch.no_grad():
@@ -38,7 +39,8 @@ class ConvAutoencoder(nn.Module):
         backbone.features[0][0] = first_conv
         self.encoder = backbone.features
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.proj = nn.Linear(1280, self.latent_dim, bias=False)
+        last_ch = int(1280 * width_mult)
+        self.proj = nn.Linear(last_ch, self.latent_dim, bias=False)
         self.norm = nn.LayerNorm(self.latent_dim)
         self.head = nn.Linear(self.latent_dim, 1)
 
@@ -69,33 +71,24 @@ def _make_pseudo_anomaly(x: torch.Tensor) -> torch.Tensor:
     """Strong corruption to create pseudo-anomalies from normal spectrograms."""
     out = x.clone()
     n, _, f, t = out.shape
-    device = out.device
 
-    # Random frequency mask
-    mask_f = torch.randint(low=max(2, f // 16), high=max(3, f // 4), size=(n,), device=device)
-    start_f = torch.zeros((n,), dtype=torch.long, device=device)
-    for i in range(n):
-        max_start_f = max(1, int(f - int(mask_f[i].item())))
-        start_f[i] = torch.randint(low=0, high=max_start_f, size=(1,), device=device).item()
-    for i in range(n):
-        sf = int(start_f[i].item())
-        ef = int(sf + mask_f[i].item())
-        out[i, :, sf:ef, :] = 0.0
+    # Random frequency mask (vectorized)
+    mask_f = torch.randint(low=max(2, f // 16), high=max(3, f // 4), size=(n, 1, 1, 1), device=x.device)
+    start_f = torch.stack([torch.randint(0, max(1, f - int(mf.item())), (1,), device=x.device) for mf in mask_f])
+    ar_f = torch.arange(f, device=x.device)[None, None, :, None]
+    fmask = (ar_f >= start_f[:, :, None, :]) & (ar_f < start_f[:, :, None, :] + mask_f)
+    out = torch.where(fmask, torch.tensor(0.0, device=x.device), out)
 
-    # Random time mask
-    mask_t = torch.randint(low=max(2, t // 16), high=max(3, t // 4), size=(n,), device=device)
-    start_t = torch.zeros((n,), dtype=torch.long, device=device)
-    for i in range(n):
-        max_start_t = max(1, int(t - int(mask_t[i].item())))
-        start_t[i] = torch.randint(low=0, high=max_start_t, size=(1,), device=device).item()
-    for i in range(n):
-        st = int(start_t[i].item())
-        et = int(st + mask_t[i].item())
-        out[i, :, :, st:et] = 0.0
+    # Random time mask (vectorized)
+    mask_t = torch.randint(low=max(2, t // 16), high=max(3, t // 4), size=(n, 1, 1, 1), device=x.device)
+    start_t = torch.stack([torch.randint(0, max(1, t - int(mt.item())), (1,), device=x.device) for mt in mask_t])
+    ar_t = torch.arange(t, device=x.device)[None, None, None, :]
+    tmask = (ar_t >= start_t[:, :, None, :]) & (ar_t < start_t[:, :, None, :] + mask_t)
+    out = torch.where(tmask, torch.tensor(0.0, device=x.device), out)
 
     # Additive noise + random gain
     noise = 0.1 * torch.randn_like(out)
-    gain = torch.empty((n, 1, 1, 1), device=device).uniform_(0.7, 1.4)
+    gain = torch.empty((n, 1, 1, 1), device=x.device).uniform_(0.7, 1.4)
     out = torch.clamp(out * gain + noise, 0.0, 1.0)
     return out
 
@@ -112,6 +105,7 @@ def train_autoencoder(
     cb=None,
     use_amp: bool = False,
     latent_l1: float = LATENT_L1,
+    stop_event=None,
 ):
     """Train one-class scorer via normal-vs-pseudo-anomaly objective."""
     model = model.to(device)
@@ -121,6 +115,7 @@ def train_autoencoder(
     )
     bce = nn.BCEWithLogitsLoss()
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
+    max_grad_norm = 5.0
 
     best_val_loss = float("inf")
     wait = 0
@@ -141,6 +136,12 @@ def train_autoencoder(
         return cls_loss + 0.5 * margin + reg
 
     for epoch in range(1, epochs + 1):
+        if stop_event and stop_event.is_set():
+            print(f"Training stopped by user at epoch {epoch}")
+            stop_event.clear()
+            if save_path and save_path.exists():
+                model.load_state_dict(torch.load(save_path, map_location=device, weights_only=True))
+            break
         model.train()
         train_losses = []
         for batch in train_loader:
@@ -152,11 +153,14 @@ def train_autoencoder(
                 with torch.amp.autocast("cuda"):
                     loss = _step_loss(x)
                 scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss = _step_loss(x)
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                 optimizer.step()
             train_losses.append(float(loss.item()))
 

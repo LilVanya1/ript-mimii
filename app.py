@@ -27,8 +27,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "mimii-228"
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(24).hex())
 PORT = 228
+_state_lock = threading.Lock()
 
 from src.config import (
     MODEL_DIR, DATA_DIR, MACHINE_TYPES, RESULTS_DIR,
@@ -76,7 +77,15 @@ state = {
     "device":           "cpu",
 }
 _model_cache: dict = {}  # machine_type -> {"model": ConvAutoencoder, "threshold": float}
+_stop_event = threading.Event()
 MAX_LOG = 500
+
+
+def _update_state(**kwargs):
+    with _state_lock:
+        for k, v in kwargs.items():
+            if k in state:
+                state[k] = v
 
 
 def log(msg: str, startup: bool = False):
@@ -141,9 +150,7 @@ def _load_norm_stats(path: Path) -> tuple[float, float] | None:
         return None
 
 
-def _warmup_autoencoder(model, device):
-    """Backward-compatible no-op; model has no lazy init now."""
-    return model
+
 
 
 def _extract_state_dict(raw_obj):
@@ -279,13 +286,8 @@ def _latest_model_record(machine_type: str, machine_id: str | None = None) -> di
 
 
 def _partial_auc(y_true, scores, max_fpr=0.1):
-    from sklearn.metrics import roc_curve
-    fpr, tpr, _ = roc_curve(y_true, scores)
-    mask = fpr <= max_fpr
-    if mask.sum() < 2:
-        return 0.0
-    _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
-    return float(_trapz(tpr[mask], fpr[mask]) / max_fpr)
+    from src.evaluate import partial_auc
+    return partial_auc(y_true, scores, max_fpr)
 
 
 def _build_tune_split(test_ds, test_labels, rng_seed: int = 42, keep_ratio: float = 0.4):
@@ -332,7 +334,6 @@ def _preload():
             continue
         try:
             model = ConvAutoencoder().to(device)
-            _warmup_autoencoder(model, device)
             _load_model_weights_checked(model, mp, device)
             model.eval()
             threshold = float(np.load(tp))
@@ -393,23 +394,30 @@ def download_data():
     machine_type = (request.json or {}).get("machine_type", "fan")
 
     def _run():
-        state.update({"status": "running", "progress": 0, "log": [], "results": {}})
+        _update_state(status="running", progress=0, log=[], results={})
         try:
             from src.download import download_mimii
             def progress_cb(downloaded, total):
                 if total:
-                    state["progress"] = max(1, min(95, int(downloaded / total * 95)))
+                    _update_state(progress=max(1, min(95, int(downloaded / total * 95))))
             log(f"Downloading MIMII: {machine_type}…")
             download_mimii([machine_type], progress_cb=progress_cb)
-            state["progress"] = 100
+            _update_state(progress=100)
             log("Download complete!")
         except Exception as e:
             log(f"ERROR: {e}")
             traceback.print_exc()
         finally:
-            state["status"] = "idle"
+            _update_state(status="idle")
 
     threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/stop", methods=["POST"])
+def stop_training():
+    _stop_event.set()
+    log("Stop requested by user")
     return jsonify({"ok": True})
 
 
@@ -435,6 +443,7 @@ def train():
     train_latent_dim = int(data.get("latent_dim", state["train_config"].get("latent_dim", LATENT_DIM)))
     train_base_channels = int(data.get("base_channels", state["train_config"].get("base_channels", BASE_CHANNELS)))
 
+    _stop_event.clear()
     if train_epochs < 1 or train_epochs > 500:
         return jsonify({"error": "epochs must be in [1, 500]"}), 400
     if train_bs < 1 or train_bs > 4096:
@@ -473,7 +482,7 @@ def train():
     }
 
     def _run():
-        state.update({"status": "running", "progress": 5, "log": [], "results": {}})
+        _update_state(status="running", progress=5, log=[], results={})
         try:
             import torch
             from torch.utils.data import DataLoader
@@ -539,7 +548,6 @@ def train():
                     base_model_path = Path(ROOT) / selected["model_path"]
                     if base_model_path.exists():
                         log(f"Finetune from {selected['id']} ({base_model_path.name})")
-                        _warmup_autoencoder(model, device)
                         try:
                             _load_model_weights_checked(model, base_model_path, device)
                             loaded_from = selected["id"]
@@ -572,7 +580,7 @@ def train():
                 model, train_loader, val_loader,
                 epochs=train_epochs, lr=train_lr, patience=train_patience,
                 device=device, save_path=save_path, cb=epoch_cb, use_amp=use_amp,
-                latent_l1=train_latent_l1,
+                latent_l1=train_latent_l1, stop_event=_stop_event,
             )
             state["progress"] = 80
             if history["train_loss"] and history["val_loss"]:
@@ -719,7 +727,7 @@ def train():
             log(f"ERROR: {e}")
             traceback.print_exc()
         finally:
-            state["status"] = "idle"
+            _update_state(status="idle")
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True})
@@ -743,6 +751,7 @@ def tune():
     threshold_mad_k = float(data.get("threshold_mad_k", THRESHOLD_MAD_K))
     threshold_quantile = float(data.get("anomaly_quantile", ANOMALY_QUANTILE))
 
+    _stop_event.clear()
     if n_trials < 3 or n_trials > 200:
         return jsonify({"error": "trials must be in [3, 200]"}), 400
     if trial_epochs < 5 or trial_epochs > 120:
@@ -771,7 +780,7 @@ def tune():
     }
 
     def _run():
-        state.update({"status": "running", "progress": 4, "log": [], "results": {}})
+        _update_state(status="running", progress=4, log=[], results={})
         try:
             import torch
             import optuna
@@ -929,7 +938,7 @@ def tune():
             log(f"ERROR: {e}")
             traceback.print_exc()
         finally:
-            state["status"] = "idle"
+            _update_state(status="idle")
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True})
@@ -950,6 +959,7 @@ def autopilot():
     trial_epochs = int(data.get("trial_epochs", 18))
     full_epochs = int(data.get("full_epochs", min(70, state["train_config"].get("epochs", EPOCHS))))
 
+    _stop_event.clear()
     if target_auc <= 0.5 or target_auc > 0.99:
         return jsonify({"error": "target_auc must be in (0.5, 0.99]"}), 400
     if max_rounds < 1 or max_rounds > 10:
@@ -962,7 +972,7 @@ def autopilot():
         return jsonify({"error": "full_epochs must be in [10, 500]"}), 400
 
     def _run():
-        state.update({"status": "running", "progress": 2, "log": [], "results": {}})
+        _update_state(status="running", progress=2, log=[], results={})
         try:
             import torch
             import optuna
@@ -1184,7 +1194,7 @@ def autopilot():
             log(f"ERROR: {e}")
             traceback.print_exc()
         finally:
-            state["status"] = "idle"
+            _update_state(status="idle")
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True})
@@ -1204,6 +1214,7 @@ def train_baseline():
     train_lr     = float(data.get("learning_rate", LEARNING_RATE))
     train_patience = int(data.get("patience", PATIENCE))
 
+    _stop_event.clear()
     if train_epochs < 1 or train_epochs > 500:
         return jsonify({"error": "epochs must be in [1, 500]"}), 400
     if train_bs < 1 or train_bs > 8192:
@@ -1214,7 +1225,7 @@ def train_baseline():
         return jsonify({"error": "patience must be in [1, 200]"}), 400
 
     def _run():
-        state.update({"status": "running", "progress": 5, "log": [], "results": {}})
+        _update_state(status="running", progress=5, log=[], results={})
         try:
             import torch
             from torch.utils.data import DataLoader
@@ -1350,7 +1361,7 @@ def train_baseline():
             log(f"ERROR: {e}")
             traceback.print_exc()
         finally:
-            state["status"] = "idle"
+            _update_state(status="idle")
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True})
@@ -1411,7 +1422,6 @@ def check_upload():
         from src.autoencoder import ConvAutoencoder
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model  = ConvAutoencoder().to(device)
-        _warmup_autoencoder(model, device)
         try:
             _load_model_weights_checked(model, selected_path, device)
         except Exception as e:
@@ -1441,7 +1451,7 @@ def check_upload():
         saved.append((safe, tmp.name))
 
     def _run():
-        state.update({"status": "running", "progress": 10, "log": [], "results": {}})
+        _update_state(status="running", progress=10, log=[], results={})
         try:
             import torch
             from src.dataset import load_audio, window_signal, extract_mel_spectrogram
@@ -1479,13 +1489,66 @@ def check_upload():
             log(f"ERROR: {e}")
             traceback.print_exc()
         finally:
-            state["status"] = "idle"
+            _update_state(status="idle")
             for _, p in saved:
                 try: Path(p).unlink()
                 except OSError: pass
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True})
+
+
+# ── Deploy endpoint (for agent auto-update) ──────────────────────────────
+DEPLOY_TOKEN = os.environ.get("DEPLOY_TOKEN", "")
+DEPLOY_ALLOWED = bool(DEPLOY_TOKEN)
+
+
+@app.route("/api/deploy", methods=["POST"])
+def deploy():
+    if not DEPLOY_ALLOWED:
+        return jsonify({"error": "Deploy disabled. Set DEPLOY_TOKEN env var."}), 403
+    token = request.headers.get("X-Deploy-Token", "")
+    if token != DEPLOY_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    if state["status"] == "running":
+        return jsonify({"error": "Busy"}), 409
+
+    data = request.json or {}
+    do_pull = data.get("pull", True)
+    do_restart = data.get("restart", True)
+
+    def _run():
+        _update_state(status="running", progress=0, log=[], results={})
+        try:
+            import subprocess, sys
+            log("Deploy: pulling latest code...")
+            if do_pull:
+                r = subprocess.run(["git", "pull", "origin", "main"],
+                                   capture_output=True, text=True, timeout=60)
+                log(r.stdout.strip())
+                if r.returncode != 0:
+                    log(f"ERROR: git pull failed: {r.stderr.strip()}")
+                    _update_state(status="idle")
+                    return
+                log("Deploy: pull OK")
+            _update_state(progress=50)
+            log("Deploy: installing deps...")
+            subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"],
+                           capture_output=True, timeout=120)
+            _update_state(progress=80)
+            if do_restart:
+                log("Deploy: restarting server...")
+                os._exit(0)
+        except subprocess.TimeoutExpired:
+            log("ERROR: Deploy timed out")
+            _update_state(status="idle")
+        except Exception as e:
+            log(f"ERROR: {e}")
+            traceback.print_exc()
+            _update_state(status="idle")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Deploy started"})
 
 
 if __name__ == "__main__":
@@ -1497,16 +1560,19 @@ if __name__ == "__main__":
 
     if args.public:
         try:
-            import ngrok
+            import ngrok  # pip install ngrok
             listener  = ngrok.forward(PORT, authtoken_from_env=True)
             public_url = listener.url()
             logger.info("=" * 52)
             logger.info(f"  PUBLIC URL: {public_url}")
             logger.info("=" * 52)
             print(f"\n  PUBLIC URL: {public_url}\n")
+        except ImportError:
+            logger.warning("ngrok not installed. Run: pip install ngrok")
         except Exception as e:
             logger.warning(f"ngrok failed: {e}")
 
-    import webbrowser
-    webbrowser.open(f"http://localhost:{PORT}")
-    app.run(host="0.0.0.0", port=PORT, debug=False)
+    try:
+        app.run(host="0.0.0.0", port=PORT, debug=False)
+    except KeyboardInterrupt:
+        pass

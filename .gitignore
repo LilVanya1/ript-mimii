@@ -30,6 +30,10 @@ env/
 # duplicate snapshot (main code is in repo root)
 package_code_only/
 
+# large committed files that should NOT be in git
+AudioAE_code_only.zip
+*.ipynb
+
 # os / ide
 .DS_Store
 Thumbs.db
