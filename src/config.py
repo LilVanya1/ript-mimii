@@ -34,6 +34,11 @@ THRESHOLD_MAD_K = 2.2
 
 RANDOM_SEED = 42
 
+# Official MIMII baseline (Hitachi) defaults — see src/mimii_baseline.py
+BASELINE_EPOCHS = 50
+BASELINE_BATCH_SIZE = 512
+BASELINE_LR = 1e-3
+
 MIMII_ZENODO_IDS = {
     "fan":    "3384388",
     "pump":   "3384388",

@@ -71,6 +71,24 @@
       "model_path": "models\\conv_ae_fan_id_00_6db.pt",
       "threshold_path": "models\\conv_ae_fan_id_00_6db_threshold.npy",
       "norm_stats_path": "models\\conv_ae_fan_id_00_6db_norm.json"
+    },
+    {
+      "id": "fan_id_00_6db_20260701_213714",
+      "machine_type": "fan",
+      "machine_id": "id_00",
+      "snr": 6,
+      "mode": "new",
+      "base_model_id": null,
+      "epochs_trained": 50,
+      "threshold": 9.769576,
+      "auc_roc": 0.5744,
+      "pauc": 0.0956,
+      "f1": 0.2394,
+      "accuracy": 0.5393,
+      "created_at": "2026-07-01T21:37:14",
+      "model_path": "models\\conv_ae_fan_id_00_6db.pt",
+      "threshold_path": "models\\conv_ae_fan_id_00_6db_threshold.npy",
+      "norm_stats_path": "models\\conv_ae_fan_id_00_6db_norm.json"
     }
   ]
 }

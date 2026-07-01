@@ -97,3 +97,33 @@ git push origin main
 ---
 
 Если нужен датасет для train — попроси владельца скинуть папку `data/` (Syncthing/архив), в git её нет.
+
+---
+
+## 9. Удалённый deploy на машину владельца
+
+После `git push` можно подтянуть код и перезапустить сервер владельца:
+
+```bash
+curl -X POST "https://PUBLIC_URL/api/deploy" \
+  -H "Content-Type: application/json" \
+  -H "X-Deploy-Token: SECRET_FROM_OWNER" \
+  -d "{\"pull\": true, \"restart\": true}"
+```
+
+- `pull: true` — `git pull --ff-only` на ПК владельца
+- `restart: true` — перезапуск `app.py` через ~2 сек
+- Если идёт train/tune — вернёт `409 Busy`
+
+**Токен** `DEPLOY_TOKEN` выдаёт владелец лично (в `.env`, не в git).
+
+Владелец должен:
+1. Скопировать `.env.example` → `.env`
+2. Задать `DEPLOY_TOKEN` (длинная случайная строка)
+3. Запустить `python app.py --public` (ngrok URL для агента)
+4. Передать другу: **PUBLIC_URL** + **DEPLOY_TOKEN**
+
+Типичный workflow агента:
+1. Правки → `git push`
+2. `POST /api/deploy` с токеном
+3. Подождать ~5 сек → проверить `/api/state`

@@ -1,6 +1,6 @@
 """Acoustic diagnostics — ConvAutoencoder on CUDA. Full GUI."""
 
-import os, sys, threading, traceback, logging, tempfile, argparse, json, shutil
+import os, sys, threading, traceback, logging, tempfile, argparse, json, shutil, subprocess, hmac
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +16,21 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
+
+def _load_dotenv() -> None:
+    env_path = Path(ROOT) / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        os.environ.setdefault(key.strip(), val.strip().strip("\"'"))
+
+
+_load_dotenv()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -30,6 +45,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(24).hex())
 PORT = 228
 _state_lock = threading.Lock()
+DEPLOY_TOKEN = os.environ.get("DEPLOY_TOKEN", "").strip()
 
 from src.config import (
     MODEL_DIR, DATA_DIR, MACHINE_TYPES, RESULTS_DIR,
@@ -64,6 +80,7 @@ state = {
         "latent_dim": LATENT_DIM,
         "latent_l1": LATENT_L1,
         "base_channels": BASE_CHANNELS,
+        "model_backend": "mobilenet",
     },
     "tune_config":      {
         "trials": 12,
@@ -442,8 +459,11 @@ def train():
     train_latent_l1 = float(data.get("latent_l1", LATENT_L1))
     train_latent_dim = int(data.get("latent_dim", state["train_config"].get("latent_dim", LATENT_DIM)))
     train_base_channels = int(data.get("base_channels", state["train_config"].get("base_channels", BASE_CHANNELS)))
+    model_backend = (data.get("model_backend") or state["train_config"].get("model_backend") or "mobilenet").strip().lower()
 
     _stop_event.clear()
+    if model_backend not in {"mobilenet", "mimii_baseline"}:
+        return jsonify({"error": "model_backend must be mobilenet or mimii_baseline"}), 400
     if train_epochs < 1 or train_epochs > 500:
         return jsonify({"error": "epochs must be in [1, 500]"}), 400
     if train_bs < 1 or train_bs > 4096:
@@ -479,6 +499,7 @@ def train():
         "latent_dim": train_latent_dim,
         "latent_l1": train_latent_l1,
         "base_channels": train_base_channels,
+        "model_backend": model_backend,
     }
 
     def _run():
@@ -486,9 +507,6 @@ def train():
         try:
             import torch
             from torch.utils.data import DataLoader
-            from src.dataset import build_datasets
-            from src.autoencoder import ConvAutoencoder, train_autoencoder, compute_threshold
-            from src.evaluate import evaluate_anomaly_detection, partial_auc
             from sklearn.metrics import (
                 roc_auc_score, roc_curve, confusion_matrix,
                 accuracy_score, f1_score, classification_report,
@@ -500,6 +518,186 @@ def train():
             log(f"Device: {device}  CUDA={torch.cuda.is_available()}")
             if torch.cuda.is_available():
                 log(f"GPU: {torch.cuda.get_device_name(0)}")
+
+            if model_backend == "mimii_baseline":
+                from src.mimii_baseline import (
+                    BASELINE_BATCH_SIZE,
+                    BASELINE_LR,
+                    MimiiBaselineAE,
+                    build_baseline_pack,
+                    compute_baseline_threshold,
+                    evaluate_baseline_file_level,
+                    save_baseline_meta,
+                    train_baseline_ae,
+                )
+                from src.evaluate import partial_auc
+
+                log(f"MIMII official baseline | {machine_type}/{machine_id} @ {snr_db}dB")
+                state["progress"] = 8
+
+                def file_cb(done, total):
+                    pct = 8 + int(done / total * 12)
+                    state["progress"] = pct
+                    if done == total or done % 10 == 0:
+                        log(f"Baseline features: files {done}/{total}")
+
+                pack = build_baseline_pack(
+                    machine_type, snr_db=snr_db, machine_id=machine_id, progress_cb=file_cb,
+                )
+                cfg = pack["cfg"]
+                train_vectors = pack["train_vectors"]
+                val_vectors = pack["val_vectors"]
+                eval_files = pack["eval_files"]
+                eval_labels = pack["eval_labels"]
+                log(
+                    f"baseline split | train_vectors={len(train_vectors)} "
+                    f"eval_files={len(eval_files)} (file-level AUC)"
+                )
+                state["progress"] = 22
+
+                model = MimiiBaselineAE(input_dim=cfg.input_dim).to(device)
+                save_path = _model_path_for(machine_type, machine_id, snr_db)
+                bl_epochs = train_epochs
+                bl_bs = train_bs if train_bs >= 64 else BASELINE_BATCH_SIZE
+                bl_lr = train_lr if abs(train_lr - LEARNING_RATE) > 1e-12 else BASELINE_LR
+
+                def epoch_cb(epoch, t_loss, v_loss):
+                    pct = 22 + int(epoch / bl_epochs * 58)
+                    state["progress"] = min(pct, 80)
+                    log(f"Epoch {epoch:3d}/{bl_epochs} | train={t_loss:.6f} | val={v_loss:.6f}")
+
+                model, history = train_baseline_ae(
+                    model,
+                    train_vectors,
+                    epochs=bl_epochs,
+                    lr=bl_lr,
+                    patience=train_patience,
+                    device=device,
+                    save_path=save_path,
+                    cb=epoch_cb,
+                    batch_size=bl_bs,
+                )
+                state["progress"] = 82
+
+                log("Computing baseline threshold…")
+                threshold = compute_baseline_threshold(
+                    model, val_vectors, device, quantile=train_quantile,
+                )
+                threshold_path = _threshold_path_for(machine_type, machine_id, snr_db)
+                norm_stats_path = _norm_stats_path_for(machine_type, machine_id, snr_db)
+                np.save(threshold_path, threshold)
+                save_baseline_meta(norm_stats_path, cfg)
+
+                log("Evaluating (official file-level AUC)…")
+                eval_res = evaluate_baseline_file_level(
+                    model, eval_files, eval_labels, cfg, device, threshold=threshold,
+                )
+                scores = eval_res["errors"]
+                test_labels = eval_labels
+                auc = float(eval_res["auc_roc"])
+                pauc = float(partial_auc(test_labels, scores))
+                preds = (scores > threshold).astype(int)
+                norm_mean = float(scores[test_labels == 0].mean()) if (test_labels == 0).any() else 0.0
+                abn_mean = float(scores[test_labels == 1].mean()) if (test_labels == 1).any() else 0.0
+                separation = abn_mean - norm_mean
+                log(f"File-level AUC={auc:.4f} pAUC={pauc:.4f}")
+                log(f"Error separation | normal={norm_mean:.6f} abnormal={abn_mean:.6f} delta={separation:.6f}")
+
+                suffix = _model_key(machine_type, machine_id, snr_db)
+                norm_scores = scores[test_labels == 0]
+                abn_scores = scores[test_labels == 1]
+
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.hist(norm_scores, bins=30, alpha=0.65, label="Normal", color="steelblue", density=True)
+                ax.hist(abn_scores, bins=30, alpha=0.65, label="Abnormal", color="tomato", density=True)
+                ax.axvline(threshold, color="black", linestyle="--", lw=2, label=f"thr={threshold:.4f}")
+                ax.set_xlabel("File mean MSE"); ax.set_ylabel("Density")
+                ax.set_title(f"Baseline scores — {suffix}"); ax.legend()
+                plt.tight_layout(); fig.savefig(RESULTS_DIR / f"scores_{suffix}.png", dpi=150); plt.close(fig)
+
+                fpr, tpr, _ = roc_curve(test_labels, scores)
+                fig, ax = plt.subplots(figsize=(7, 7))
+                ax.plot(fpr, tpr, lw=2, label=f"AUC = {auc:.4f}")
+                ax.plot([0, 1], [0, 1], "k--", lw=1)
+                ax.set_xlabel("FPR"); ax.set_ylabel("TPR")
+                ax.set_title(f"ROC (file-level) — {suffix}"); ax.legend(loc="lower right")
+                plt.tight_layout(); fig.savefig(RESULTS_DIR / f"roc_{suffix}.png", dpi=150); plt.close(fig)
+
+                cm = confusion_matrix(test_labels, preds)
+                fig, ax = plt.subplots(figsize=(5, 4))
+                sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+                            xticklabels=["Normal", "Anomaly"],
+                            yticklabels=["Normal", "Anomaly"], ax=ax)
+                ax.set_xlabel("Predicted"); ax.set_ylabel("True")
+                ax.set_title(f"Confusion — {suffix}")
+                plt.tight_layout(); fig.savefig(RESULTS_DIR / f"cm_{suffix}.png", dpi=150); plt.close(fig)
+
+                fig, ax = plt.subplots(figsize=(8, 4))
+                ax.plot(history["train_loss"], label="Train Loss")
+                ax.plot(history["val_loss"], label="Val Loss")
+                ax.set_xlabel("Epoch"); ax.set_ylabel("MSE")
+                ax.set_title(f"Baseline history — {suffix}"); ax.legend()
+                plt.tight_layout(); fig.savefig(RESULTS_DIR / f"history_{suffix}.png", dpi=150); plt.close(fig)
+
+                _model_cache[_model_key(machine_type, machine_id, snr_db)] = {
+                    "model": model,
+                    "threshold": threshold,
+                    "norm_stats": None,
+                    "backend": "mimii_baseline",
+                    "baseline_cfg": cfg,
+                }
+                key = _model_key(machine_type, machine_id, snr_db)
+                if key not in state["available_models"]:
+                    state["available_models"].append(key)
+
+                state["progress"] = 95
+                state["results"]["train"] = {
+                    "machine_type": machine_type,
+                    "machine_id": machine_id,
+                    "snr": snr_db,
+                    "train_mode": "new",
+                    "model_backend": "mimii_baseline",
+                    "finetuned_from": None,
+                    "auc_roc": round(auc, 4),
+                    "pauc": round(pauc, 4),
+                    "threshold": round(float(threshold), 6),
+                    "train_clips": len(train_vectors),
+                    "eval_files": len(eval_files),
+                    "accuracy": round(float(accuracy_score(test_labels, preds)), 4),
+                    "f1": round(float(f1_score(test_labels, preds)), 4),
+                    "epochs_trained": len(history.get("train_loss", [])),
+                    "config": state["train_config"],
+                    "report": classification_report(test_labels, preds, target_names=["Normal", "Anomaly"]),
+                    "normal_error_mean": round(norm_mean, 6),
+                    "abnormal_error_mean": round(abn_mean, 6),
+                    "error_delta": round(separation, 6),
+                }
+                run_record = _register_model(
+                    machine_type=machine_type,
+                    machine_id=machine_id,
+                    snr_db=snr_db,
+                    threshold=threshold,
+                    metrics=state["results"]["train"],
+                    mode="new",
+                    base_model_id=None,
+                    epochs_trained=len(history.get("train_loss", [])),
+                    model_path=save_path,
+                    threshold_path=threshold_path,
+                    norm_stats_path=norm_stats_path,
+                )
+                hist_model = MODEL_HISTORY_DIR / f"{run_record['id']}.pt"
+                hist_thr = MODEL_HISTORY_DIR / f"{run_record['id']}_threshold.npy"
+                hist_norm = MODEL_HISTORY_DIR / f"{run_record['id']}_norm.json"
+                shutil.copy2(save_path, hist_model)
+                shutil.copy2(threshold_path, hist_thr)
+                shutil.copy2(norm_stats_path, hist_norm)
+                state["progress"] = 100
+                log(f"Done! baseline file-AUC={auc:.4f}  thr={threshold:.6f}")
+                return
+
+            from src.dataset import build_datasets
+            from src.autoencoder import ConvAutoencoder, train_autoencoder, compute_threshold
+            from src.evaluate import evaluate_anomaly_detection, partial_auc
             log(f"Loading + precomputing spectrograms: {machine_type}…")
             state["progress"] = 8
 
@@ -1497,58 +1695,87 @@ def check_upload():
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True})
 
+def _git_executable() -> str:
+    for candidate in ("git", r"C:\Program Files\Git\bin\git.exe"):
+        try:
+            subprocess.run(
+                [candidate, "--version"],
+                capture_output=True,
+                check=True,
+            )
+            return candidate
+        except (OSError, subprocess.CalledProcessError):
+            continue
+    return "git"
 
-# ── Deploy endpoint (for agent auto-update) ──────────────────────────────
-DEPLOY_TOKEN = os.environ.get("DEPLOY_TOKEN", "")
-DEPLOY_ALLOWED = bool(DEPLOY_TOKEN)
+
+def _deploy_token_ok() -> bool:
+    if not DEPLOY_TOKEN:
+        return False
+    header = (request.headers.get("X-Deploy-Token") or "").strip()
+    auth = (request.headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        header = auth[7:].strip()
+    if not header:
+        body = request.get_json(silent=True) or {}
+        header = str(body.get("token") or "").strip()
+    return bool(header) and hmac.compare_digest(header, DEPLOY_TOKEN)
 
 
 @app.route("/api/deploy", methods=["POST"])
 def deploy():
-    if not DEPLOY_ALLOWED:
-        return jsonify({"error": "Deploy disabled. Set DEPLOY_TOKEN env var."}), 403
-    token = request.headers.get("X-Deploy-Token", "")
-    if token != DEPLOY_TOKEN:
+    """Remote pull + restart for collaborator agents (requires DEPLOY_TOKEN)."""
+    if not DEPLOY_TOKEN:
+        return jsonify({"error": "Deploy disabled. Set DEPLOY_TOKEN in .env"}), 403
+    if not _deploy_token_ok():
         return jsonify({"error": "Unauthorized"}), 401
     if state["status"] == "running":
-        return jsonify({"error": "Busy"}), 409
+        return jsonify({"error": "Busy — training/tuning in progress"}), 409
 
-    data = request.json or {}
-    do_pull = data.get("pull", True)
-    do_restart = data.get("restart", True)
+    data = request.get_json(silent=True) or {}
+    do_pull = bool(data.get("pull", True))
+    do_restart = bool(data.get("restart", True))
+    pull_out = {"stdout": "", "stderr": "", "returncode": 0, "skipped": not do_pull}
 
-    def _run():
-        _update_state(status="running", progress=0, log=[], results={})
+    if do_pull:
         try:
-            import subprocess, sys
-            log("Deploy: pulling latest code...")
-            if do_pull:
-                r = subprocess.run(["git", "pull", "origin", "main"],
-                                   capture_output=True, text=True, timeout=60)
-                log(r.stdout.strip())
-                if r.returncode != 0:
-                    log(f"ERROR: git pull failed: {r.stderr.strip()}")
-                    _update_state(status="idle")
-                    return
-                log("Deploy: pull OK")
-            _update_state(progress=50)
-            log("Deploy: installing deps...")
-            subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"],
-                           capture_output=True, timeout=120)
-            _update_state(progress=80)
-            if do_restart:
-                log("Deploy: restarting server...")
-                os._exit(0)
-        except subprocess.TimeoutExpired:
-            log("ERROR: Deploy timed out")
-            _update_state(status="idle")
+            proc = subprocess.run(
+                [_git_executable(), "pull", "--ff-only"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            pull_out = {
+                "stdout": proc.stdout.strip(),
+                "stderr": proc.stderr.strip(),
+                "returncode": proc.returncode,
+                "skipped": False,
+            }
+            if proc.returncode != 0:
+                return jsonify({"ok": False, "pull": pull_out}), 500
         except Exception as e:
-            log(f"ERROR: {e}")
-            traceback.print_exc()
-            _update_state(status="idle")
+            return jsonify({"ok": False, "error": str(e), "pull": pull_out}), 500
 
-    threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Deploy started"})
+    if do_restart:
+        helper = Path(ROOT) / "scripts" / "restart_after_deploy.py"
+        flags = 0
+        if os.name == "nt":
+            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(
+            [sys.executable, str(helper)],
+            cwd=ROOT,
+            creationflags=flags,
+            close_fds=True,
+        )
+        return jsonify({
+            "ok": True,
+            "pull": pull_out,
+            "restart": "scheduled",
+            "message": "Server restarts in ~2s with updated code",
+        })
+
+    return jsonify({"ok": True, "pull": pull_out, "restart": "skipped"})
 
 
 if __name__ == "__main__":

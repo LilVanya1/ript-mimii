@@ -44,3 +44,6 @@ Thumbs.db
 # temp uploads
 uploads/
 tmp/
+
+# local notes with secrets
+FRIEND_CREDENTIALS.txt
