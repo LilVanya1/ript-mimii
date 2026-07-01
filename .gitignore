@@ -1,0 +1,42 @@
+# datasets (large, local only)
+data/
+results/
+
+# GitHub file limit 100MB
+models/history/fan_20260630_221402.pt
+
+# secrets & env
+.env
+.env.*
+*.pem
+id_rsa*
+ngrok.yml
+
+# logs
+*.log
+app_err.log
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# jupyter
+.ipynb_checkpoints/
+
+# duplicate snapshot (main code is in repo root)
+package_code_only/
+
+# os / ide
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# temp uploads
+uploads/
+tmp/
