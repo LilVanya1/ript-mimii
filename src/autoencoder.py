@@ -39,7 +39,7 @@ class ConvAutoencoder(nn.Module):
         backbone.features[0][0] = first_conv
         self.encoder = backbone.features
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        last_ch = int(1280 * width_mult)
+        last_ch = self.encoder[-1][0].out_channels
         self.proj = nn.Linear(last_ch, self.latent_dim, bias=False)
         self.norm = nn.LayerNorm(self.latent_dim)
         self.head = nn.Linear(self.latent_dim, 1)
