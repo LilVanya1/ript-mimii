@@ -40,3 +40,10 @@ MIMII_ZENODO_IDS = {
     "slider": "3384388",
     "valve":  "3384388",
 }
+
+# Baseline Dense Autoencoder (MIMII paper reproduction)
+BASELINE_N_MELS = 64
+BASELINE_FRAMES = 5
+BASELINE_N_FFT = 1024
+BASELINE_HOP_LENGTH = 512
+BASELINE_POWER = 2.0

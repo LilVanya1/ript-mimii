@@ -279,3 +279,118 @@ def compute_threshold(
         threshold = med + mad_k * mad_scaled
         print(f"Anomaly threshold [kde_fpr->mad fallback, reason={ex}]: {threshold:.6f}")
         return float(threshold)
+
+
+# ── Baseline Dense Autoencoder (MIMII baseline reproduction) ─────────────
+
+class DenseAutoencoder(nn.Module):
+    """Simple dense autoencoder matching MIMII baseline architecture:
+    320 -> 64 -> 64 -> 8 -> 64 -> 64 -> 320, MSE reconstruction.
+    """
+    def __init__(self, input_dim: int = 320):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 8),
+            nn.ReLU(),
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(8, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, input_dim),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        z = self.encoder(x)
+        return self.decoder(z)
+
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        return self.encoder(x)
+
+    def reconstruction_error(self, x: torch.Tensor) -> torch.Tensor:
+        x_hat = self(x)
+        err = torch.mean((x - x_hat) ** 2, dim=1)
+        return err
+
+
+def train_dense_autoencoder(
+    model: DenseAutoencoder,
+    train_loader,
+    val_loader,
+    epochs: int,
+    lr: float,
+    patience: int,
+    device: torch.device,
+    save_path: Path | None = None,
+    cb=None,
+):
+    """Train DenseAutoencoder with MSE reconstruction (baseline style)."""
+    model = model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=max(3, patience // 2)
+    )
+    mse = nn.MSELoss()
+
+    best_val_loss = float("inf")
+    wait = 0
+    history = {"train_loss": [], "val_loss": [], "lr": []}
+
+    for epoch in range(1, epochs + 1):
+        model.train()
+        train_losses = []
+        for batch in train_loader:
+            x = batch[0] if isinstance(batch, (list, tuple)) else batch
+            x = x.to(device, non_blocking=True)
+            optimizer.zero_grad(set_to_none=True)
+            x_hat = model(x)
+            loss = mse(x_hat, x)
+            loss.backward()
+            optimizer.step()
+            train_losses.append(float(loss.item()))
+
+        model.eval()
+        val_losses = []
+        with torch.no_grad():
+            for batch in val_loader:
+                x = batch[0] if isinstance(batch, (list, tuple)) else batch
+                x = x.to(device, non_blocking=True)
+                x_hat = model(x)
+                loss = mse(x_hat, x)
+                val_losses.append(float(loss.item()))
+
+        t_loss = float(np.mean(train_losses))
+        v_loss = float(np.mean(val_losses))
+        scheduler.step(v_loss)
+        current_lr = float(optimizer.param_groups[0]["lr"])
+
+        history["train_loss"].append(t_loss)
+        history["val_loss"].append(v_loss)
+        history["lr"].append(current_lr)
+
+        if cb:
+            cb(epoch, t_loss, v_loss)
+        else:
+            print(f"Epoch {epoch:3d} | train={t_loss:.6f} | val={v_loss:.6f} | lr={current_lr:.2e}")
+
+        if v_loss < best_val_loss:
+            best_val_loss = v_loss
+            wait = 0
+            if save_path:
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(model.state_dict(), save_path)
+        else:
+            wait += 1
+            if wait >= patience:
+                print(f"Early stopping at epoch {epoch}")
+                break
+
+    if save_path and save_path.exists():
+        model.load_state_dict(torch.load(save_path, map_location=device, weights_only=True))
+
+    return model, history

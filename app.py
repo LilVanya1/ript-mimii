@@ -34,6 +34,7 @@ from src.config import (
     MODEL_DIR, DATA_DIR, MACHINE_TYPES, RESULTS_DIR,
     BATCH_SIZE, EPOCHS, LEARNING_RATE, PATIENCE, ANOMALY_QUANTILE,
     THRESHOLD_METHOD, THRESHOLD_TARGET_FPR, THRESHOLD_MAD_K, LATENT_DIM, LATENT_L1, BASE_CHANNELS,
+    BASELINE_N_MELS, BASELINE_FRAMES, BASELINE_N_FFT, BASELINE_HOP_LENGTH, BASELINE_POWER,
 )
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1179,6 +1180,172 @@ def autopilot():
                 f"[AutoPilot] done | best_auc={state['results']['autopilot']['best_auc']:.4f} "
                 f"| status={state['results']['autopilot']['status']}"
             )
+        except Exception as e:
+            log(f"ERROR: {e}")
+            traceback.print_exc()
+        finally:
+            state["status"] = "idle"
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/train_baseline", methods=["POST"])
+def train_baseline():
+    """Train the baseline DenseAutoencoder (MIMII style, MSE reconstruction)."""
+    if state["status"] == "running":
+        return jsonify({"error": "Busy"}), 409
+    data         = request.json or {}
+    machine_type = data.get("machine_type", "fan")
+    machine_id   = _normalize_machine_id(data.get("machine_id"))
+    snr_db       = int(data.get("snr", 6))
+    train_epochs = int(data.get("epochs", EPOCHS))
+    train_bs     = int(data.get("batch_size", BATCH_SIZE))
+    train_lr     = float(data.get("learning_rate", LEARNING_RATE))
+    train_patience = int(data.get("patience", PATIENCE))
+
+    if train_epochs < 1 or train_epochs > 500:
+        return jsonify({"error": "epochs must be in [1, 500]"}), 400
+    if train_bs < 1 or train_bs > 8192:
+        return jsonify({"error": "batch_size must be in [1, 8192]"}), 400
+    if train_lr <= 0 or train_lr > 1:
+        return jsonify({"error": "learning_rate must be in (0, 1]"}), 400
+    if train_patience < 1 or train_patience > 200:
+        return jsonify({"error": "patience must be in [1, 200]"}), 400
+
+    def _run():
+        state.update({"status": "running", "progress": 5, "log": [], "results": {}})
+        try:
+            import torch
+            from torch.utils.data import DataLoader
+            from src.dataset import build_baseline_datasets
+            from src.autoencoder import DenseAutoencoder, train_dense_autoencoder
+            from sklearn.metrics import roc_auc_score, roc_curve, confusion_matrix, accuracy_score, f1_score, classification_report
+
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            log(f"[Baseline AE] Device: {device}")
+            log(f"Loading data: {machine_type} @ {snr_db}dB...")
+            state["progress"] = 10
+
+            def precompute_cb(done, total):
+                pct = 10 + int(done / max(1, total) * 5)
+                state["progress"] = min(20, pct)
+
+            train_ds, val_ds, test_ds, test_labels = build_baseline_datasets(
+                machine_type, snr_db=snr_db, progress_cb=precompute_cb, machine_id=machine_id,
+                n_mels=BASELINE_N_MELS, frames=BASELINE_FRAMES,
+                n_fft=BASELINE_N_FFT, hop_length=BASELINE_HOP_LENGTH, power=BASELINE_POWER,
+            )
+            log(f"train={len(train_ds)}  val={len(val_ds)}  test={len(test_ds)}")
+            state["progress"] = 20
+
+            input_dim = BASELINE_N_MELS * BASELINE_FRAMES
+            train_loader = DataLoader(train_ds, batch_size=train_bs, shuffle=True, num_workers=0)
+            val_loader   = DataLoader(val_ds,   batch_size=train_bs, shuffle=False, num_workers=0)
+            test_loader  = DataLoader(test_ds,  batch_size=train_bs, shuffle=False, num_workers=0)
+
+            model = DenseAutoencoder(input_dim=input_dim).to(device)
+            n_params = sum(p.numel() for p in model.parameters())
+            log(f"DenseAutoencoder ({n_params:,} params) input_dim={input_dim} — training...")
+            state["progress"] = 25
+
+            save_path = MODEL_DIR / f"dense_ae_{_model_key(machine_type, machine_id, snr_db)}.pt"
+
+            def epoch_cb(epoch, t_loss, v_loss):
+                pct = 25 + int(epoch / train_epochs * 50)
+                state["progress"] = min(pct, 75)
+                log(f"Epoch {epoch:3d}/{train_epochs} | train={t_loss:.6f} | val={v_loss:.6f}")
+
+            model, history = train_dense_autoencoder(
+                model, train_loader, val_loader,
+                epochs=train_epochs, lr=train_lr, patience=train_patience,
+                device=device, save_path=save_path, cb=epoch_cb,
+            )
+            state["progress"] = 80
+
+            # Evaluate
+            log("Evaluating...")
+            model.eval()
+            scores = []
+            with torch.no_grad():
+                for batch in test_loader:
+                    x = batch[0] if isinstance(batch, (list, tuple)) else batch
+                    x = x.to(device)
+                    err = model.reconstruction_error(x)
+                    scores.extend(err.cpu().numpy().tolist())
+            scores = np.array(scores, dtype=np.float64)
+            auc = float(roc_auc_score(test_labels, scores))
+            pauc = float(_partial_auc(test_labels, scores))
+
+            # Threshold from validation error distribution (quantile)
+            val_scores = []
+            with torch.no_grad():
+                for batch in val_loader:
+                    x = batch[0] if isinstance(batch, (list, tuple)) else batch
+                    x = x.to(device)
+                    val_scores.extend(model.reconstruction_error(x).cpu().numpy().tolist())
+            threshold = float(np.quantile(val_scores, 0.90))
+            preds = (scores > threshold).astype(int)
+
+            norm_mean = float(scores[test_labels == 0].mean()) if (test_labels == 0).any() else 0.0
+            abn_mean = float(scores[test_labels == 1].mean()) if (test_labels == 1).any() else 0.0
+            log(f"Baseline AE | AUC={auc:.4f} pAUC={pauc:.4f} thr={threshold:.6f} "
+                f"norm_err={norm_mean:.6f} abn_err={abn_mean:.6f}")
+
+            state["progress"] = 90
+            log("Generating plots...")
+
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            suffix = f"dense_{_model_key(machine_type, machine_id, snr_db)}"
+
+            # Score distribution
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.hist(scores[test_labels == 0], bins=60, alpha=0.65, label="Normal", color="steelblue", density=True)
+            ax.hist(scores[test_labels == 1], bins=60, alpha=0.65, label="Abnormal", color="tomato", density=True)
+            ax.axvline(threshold, color="black", linestyle="--", lw=2, label=f"thr={threshold:.4f}")
+            ax.set_xlabel("MSE Reconstruction Error"); ax.set_ylabel("Density")
+            ax.set_title(f"Baseline AE — {machine_type}"); ax.legend()
+            plt.tight_layout(); fig.savefig(RESULTS_DIR / f"scores_{suffix}.png", dpi=150)
+            plt.close(fig)
+
+            # ROC
+            fpr, tpr, _ = roc_curve(test_labels, scores)
+            fig, ax = plt.subplots(figsize=(7, 7))
+            ax.plot(fpr, tpr, lw=2, label=f"AUC = {auc:.4f}")
+            ax.plot([0, 1], [0, 1], "k--", lw=1)
+            ax.set_xlabel("FPR"); ax.set_ylabel("TPR")
+            ax.set_title(f"Baseline AE ROC — {machine_type}"); ax.legend(loc="lower right")
+            plt.tight_layout(); fig.savefig(RESULTS_DIR / f"roc_{suffix}.png", dpi=150)
+            plt.close(fig)
+
+            # Training history
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.plot(history["train_loss"], label="Train Loss")
+            ax.plot(history["val_loss"], label="Val Loss")
+            ax.set_xlabel("Epoch"); ax.set_ylabel("MSE")
+            ax.set_title(f"Baseline AE Training — {machine_type}"); ax.legend()
+            plt.tight_layout(); fig.savefig(RESULTS_DIR / f"history_{suffix}.png", dpi=150)
+            plt.close(fig)
+
+            state["results"]["baseline"] = {
+                "machine_type": machine_type,
+                "machine_id": machine_id,
+                "snr": snr_db,
+                "model": "DenseAutoencoder (baseline)",
+                "auc_roc": round(auc, 4),
+                "pauc": round(pauc, 4),
+                "threshold": round(threshold, 6),
+                "accuracy": round(float(accuracy_score(test_labels, preds)), 4),
+                "f1": round(float(f1_score(test_labels, preds)), 4),
+                "epochs_trained": len(history.get("train_loss", [])),
+                "normal_error_mean": round(norm_mean, 6),
+                "abnormal_error_mean": round(abn_mean, 6),
+                "error_delta": round(abn_mean - norm_mean, 6),
+            }
+            state["progress"] = 100
+            log(f"Baseline AE done! AUC={auc:.4f}  thr={threshold:.6f}")
+
         except Exception as e:
             log(f"ERROR: {e}")
             traceback.print_exc()

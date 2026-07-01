@@ -380,3 +380,151 @@ def build_datasets(machine_type: str, snr_db: int = 6,
         train_ds, val_ds, test_ds, test_labels.copy(), list(test_abnormal_ids), norm_stats
     )
     return train_ds, val_ds, test_ds, test_labels, test_abnormal_ids, norm_stats
+
+
+# ── Baseline-style feature extraction (MIMII dense AE) ───────────────────
+
+def file_to_vector_array(wav_path: Path,
+                         n_mels: int = 64,
+                         frames: int = 5,
+                         n_fft: int = 1024,
+                         hop_length: int = 512,
+                         power: float = 2.0) -> np.ndarray:
+    """
+    Convert a wav file to a 2D array of stacked log-mel frames.
+    Mirrors MIMII baseline baseline.py::file_to_vector_array.
+
+    Returns shape (n_vectors, n_mels * frames) or empty (0, dims) if too short.
+    """
+    import librosa
+    import sys
+    sr, y = demux_wav(str(wav_path), channel=0)
+    # librosa 0.10+ returns (y, sr) from load, but demux_wav returns (sr, y)
+    mel = librosa.feature.melspectrogram(
+        y=y, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, power=power
+    )
+    log_mel = 20.0 / power * np.log10(mel + sys.float_info.epsilon)
+    dims = n_mels * frames
+    n_vec = log_mel.shape[1] - frames + 1
+    if n_vec < 1:
+        return np.empty((0, dims), dtype=np.float32)
+    vecs = np.zeros((n_vec, dims), dtype=np.float32)
+    for t in range(frames):
+        vecs[:, n_mels * t: n_mels * (t + 1)] = log_mel[:, t: t + n_vec].T
+    return vecs
+
+
+def demux_wav(wav_path: str, channel: int = 0):
+    """Load wav, handle multi-channel by selecting the given channel."""
+    import librosa
+    y, sr = librosa.load(wav_path, sr=None, mono=False)
+    if y.ndim <= 1:
+        return sr, y
+    return sr, np.array(y)[channel, :]
+
+
+class BaselineVectorDataset(Dataset):
+    """Dataset that yields stacked log-mel frame vectors for DenseAutoencoder.
+
+    Each item is a 1D tensor of shape (n_mels * frames,).
+    Used only for the baseline DenseAutoencoder (MSE reconstruction).
+    """
+
+    def __init__(self, files: list[Path] | None = None,
+                 vectors: np.ndarray | None = None,
+                 labels: np.ndarray | None = None,
+                 n_mels: int = 64, frames: int = 5,
+                 n_fft: int = 1024, hop_length: int = 512,
+                 power: float = 2.0, progress_cb=None):
+        self.labels = labels
+        if vectors is not None:
+            self.data = torch.from_numpy(vectors).float()
+            return
+        # Compute from files
+        all_vecs = []
+        n = len(files)
+        for i, fp in enumerate(files):
+            vecs = file_to_vector_array(fp, n_mels, frames, n_fft, hop_length, power)
+            if vecs.shape[0] > 0:
+                all_vecs.append(vecs)
+            if progress_cb and i % 50 == 0:
+                progress_cb(i, n)
+        if all_vecs:
+            self.data = torch.from_numpy(np.concatenate(all_vecs, axis=0)).float()
+        else:
+            self.data = torch.empty((0, n_mels * frames), dtype=torch.float32)
+        logger.info(f"BaselineVectorDataset: {len(self.data)} vectors from {n} files")
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        x = self.data[idx]
+        if self.labels is not None:
+            return x, int(self.labels[idx])
+        return x
+
+
+def build_baseline_datasets(machine_type: str, snr_db: int = 6,
+                            val_ratio: float = 0.15, test_ratio: float = 0.15,
+                            seed: int = RANDOM_SEED,
+                            progress_cb=None, machine_id: str | None = None,
+                            n_mels: int = 64, frames: int = 5,
+                            n_fft: int = 1024, hop_length: int = 512,
+                            power: float = 2.0):
+    """Build datasets for baseline DenseAutoencoder (frame-vector format)."""
+    rng = np.random.default_rng(seed)
+    files_info = discover_files(machine_type, snr_db, machine_id=machine_id)
+
+    normal_paths = []
+    abnormal_paths = []
+    for mid, paths in files_info["normal"].items():
+        normal_paths.extend(paths)
+    for mid, paths in files_info["abnormal"].items():
+        abnormal_paths.extend(paths)
+
+    if not normal_paths:
+        raise FileNotFoundError(f"No normal audio files for {machine_type} @ {snr_db}dB")
+
+    n_files = len(normal_paths)
+    file_idx = rng.permutation(n_files)
+    n_test = max(1, int(n_files * test_ratio))
+    n_val = max(1, int(n_files * val_ratio))
+    n_train = max(1, n_files - n_test - n_val)
+
+    test_idx = file_idx[:n_test]
+    val_idx = file_idx[n_test:n_test + n_val]
+    train_idx = file_idx[n_test + n_val:n_test + n_val + n_train]
+
+    train_files = [normal_paths[i] for i in train_idx]
+    val_files = [normal_paths[i] for i in val_idx]
+    test_normal_files = [normal_paths[i] for i in test_idx]
+
+    train_ds = BaselineVectorDataset(train_files, n_mels=n_mels, frames=frames,
+                                     n_fft=n_fft, hop_length=hop_length, power=power,
+                                     progress_cb=progress_cb)
+    val_ds = BaselineVectorDataset(val_files, n_mels=n_mels, frames=frames,
+                                   n_fft=n_fft, hop_length=hop_length, power=power)
+    # Test: normal + abnormal vectorized
+    test_normal_vecs = None
+    nv = [file_to_vector_array(fp, n_mels, frames, n_fft, hop_length, power)
+          for fp in test_normal_files]
+    if nv:
+        test_normal_vecs = np.concatenate([v for v in nv if v.shape[0] > 0], axis=0)
+    abnormal_vecs = None
+    av = [file_to_vector_array(fp, n_mels, frames, n_fft, hop_length, power)
+          for fp in abnormal_paths]
+    if av:
+        abnormal_vecs = np.concatenate([v for v in av if v.shape[0] > 0], axis=0)
+
+    n_norm = test_normal_vecs.shape[0] if test_normal_vecs is not None else 0
+    n_abn = abnormal_vecs.shape[0] if abnormal_vecs is not None else 0
+    test_all = np.concatenate([test_normal_vecs, abnormal_vecs], axis=0) if n_norm + n_abn > 0 else np.empty((0, n_mels * frames))
+    test_labels = np.array([0] * n_norm + [1] * n_abn)
+
+    test_ds = BaselineVectorDataset(vectors=test_all, labels=test_labels)
+
+    logger.info(f"[baseline {machine_type} @ {snr_db}dB] train={len(train_ds)} "
+                f"val={len(val_ds)} test_norm={n_norm} test_abn={n_abn}")
+
+    return train_ds, val_ds, test_ds, test_labels
