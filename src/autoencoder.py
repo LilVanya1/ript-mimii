@@ -71,24 +71,27 @@ def _make_pseudo_anomaly(x: torch.Tensor) -> torch.Tensor:
     """Strong corruption to create pseudo-anomalies from normal spectrograms."""
     out = x.clone()
     n, _, f, t = out.shape
+    dev = x.device
 
-    # Random frequency mask (vectorized)
-    mask_f = torch.randint(low=max(2, f // 16), high=max(3, f // 4), size=(n, 1, 1, 1), device=x.device)
-    start_f = torch.stack([torch.randint(0, max(1, f - int(mf.item())), (1,), device=x.device) for mf in mask_f])
-    ar_f = torch.arange(f, device=x.device)[None, None, :, None]
-    fmask = (ar_f >= start_f[:, :, None, :]) & (ar_f < start_f[:, :, None, :] + mask_f)
-    out = torch.where(fmask, torch.tensor(0.0, device=x.device), out)
+    # Random frequency mask (fully vectorized)
+    mask_f = torch.randint(low=max(2, f // 16), high=max(3, f // 4), size=(n, 1, 1, 1), device=dev)
+    max_start_f = (f - mask_f.float()).clamp(min=1)
+    start_f = (torch.rand(n, 1, 1, 1, device=dev) * max_start_f).long()
+    ar_f = torch.arange(f, device=dev)[None, None, :, None]
+    fmask = (ar_f >= start_f) & (ar_f < start_f + mask_f)
+    out = torch.where(fmask, torch.tensor(0.0, device=dev), out)
 
-    # Random time mask (vectorized)
-    mask_t = torch.randint(low=max(2, t // 16), high=max(3, t // 4), size=(n, 1, 1, 1), device=x.device)
-    start_t = torch.stack([torch.randint(0, max(1, t - int(mt.item())), (1,), device=x.device) for mt in mask_t])
-    ar_t = torch.arange(t, device=x.device)[None, None, None, :]
-    tmask = (ar_t >= start_t[:, :, None, :]) & (ar_t < start_t[:, :, None, :] + mask_t)
-    out = torch.where(tmask, torch.tensor(0.0, device=x.device), out)
+    # Random time mask (fully vectorized)
+    mask_t = torch.randint(low=max(2, t // 16), high=max(3, t // 4), size=(n, 1, 1, 1), device=dev)
+    max_start_t = (t - mask_t.float()).clamp(min=1)
+    start_t = (torch.rand(n, 1, 1, 1, device=dev) * max_start_t).long()
+    ar_t = torch.arange(t, device=dev)[None, None, None, :]
+    tmask = (ar_t >= start_t) & (ar_t < start_t + mask_t)
+    out = torch.where(tmask, torch.tensor(0.0, device=dev), out)
 
     # Additive noise + random gain
     noise = 0.1 * torch.randn_like(out)
-    gain = torch.empty((n, 1, 1, 1), device=x.device).uniform_(0.7, 1.4)
+    gain = torch.empty((n, 1, 1, 1), device=dev).uniform_(0.7, 1.4)
     out = torch.clamp(out * gain + noise, 0.0, 1.0)
     return out
 
