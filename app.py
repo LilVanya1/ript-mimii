@@ -125,16 +125,16 @@ def _model_key(machine_type: str, machine_id: str | None, snr_db: int | None = N
     return f"{base}_{int(snr_db)}db" if snr_db is not None else base
 
 
-def _normalize_machine_id(raw_value: str | None, default_id: str = "id_00") -> str:
-    """Normalize UI machine_id into strict per-ID mode."""
+def _normalize_machine_id(raw_value: str | None) -> str | None:
+    """Normalize UI machine_id. Returns None for 'all' to load all machine IDs."""
     mid = (raw_value or "").strip()
     if not mid:
-        return default_id
+        return None
     lower_mid = mid.lower()
     if lower_mid in {"all", "all id", "all ids"}:
-        return default_id
+        return None
     if "все" in lower_mid:
-        return default_id
+        return None
     return mid
 
 
@@ -359,6 +359,7 @@ def _preload():
                 log(f"WARNING {key}: missing norm stats ({norm_path.name}), "
                     f"scores will be inaccurate. Retrain to fix.", startup=True)
             _model_cache[key] = {"model": model, "threshold": threshold, "norm_stats": norm_stats}
+            _model_cache[f"{key}:latest"] = _model_cache[key]
             state["available_models"].append(key)
             log(f"Loaded: {mp.name}  thr={threshold:.6f}", startup=True)
         except Exception as e:
@@ -527,12 +528,12 @@ def train():
                 )
                 from src.evaluate import partial_auc
 
-                log(f"MIMII official baseline | {machine_type}/{machine_id} @ {snr_db}dB")
+                log(f"MIMII official baseline | {machine_type}/{machine_id or 'all'} @ {snr_db}dB")
                 state["progress"] = 8
 
                 def file_cb(done, total):
-                    pct = 8 + int(done / total * 12)
-                    state["progress"] = pct
+                    pct = 8 + int(done / max(1, total) * 12)
+                    state["progress"] = min(max(8, pct), 20)
                     if done == total or done % 10 == 0:
                         log(f"Baseline features: files {done}/{total}")
 
@@ -634,16 +635,17 @@ def train():
                 ax.set_title(f"Baseline history — {suffix}"); ax.legend()
                 plt.tight_layout(); fig.savefig(RESULTS_DIR / f"history_{suffix}.png", dpi=150); plt.close(fig)
 
-                _model_cache[_model_key(machine_type, machine_id, snr_db)] = {
+                cache_base = _model_key(machine_type, machine_id, snr_db)
+                _model_cache[cache_base] = {
                     "model": model,
                     "threshold": threshold,
                     "norm_stats": None,
                     "backend": "mimii_baseline",
                     "baseline_cfg": cfg,
                 }
-                key = _model_key(machine_type, machine_id, snr_db)
-                if key not in state["available_models"]:
-                    state["available_models"].append(key)
+                _model_cache[f"{cache_base}:latest"] = _model_cache[cache_base]
+                if cache_base not in state["available_models"]:
+                    state["available_models"].append(cache_base)
 
                 state["progress"] = 95
                 state["results"]["train"] = {
@@ -697,12 +699,13 @@ def train():
             state["progress"] = 8
 
             def precompute_cb(done, total):
-                pct = 8 + int(done / total * 7)
-                state["progress"] = pct
-                if done <= total:
-                    log(f"Preparing dataset files: {done}/{total}")
+                capped = min(done, total)
+                pct = 8 + int(capped / max(1, total) * 7)
+                state["progress"] = min(15, pct)
+                if capped < total:
+                    log(f"Preparing dataset files: {capped}/{total}")
                 else:
-                    log(f"Precomputing spectrograms: {done-total}/{total}")
+                    log(f"Processing windows ({done - total}/{total} windows)...")
 
             train_ds, val_ds, test_ds, test_labels, _, norm_stats = build_datasets(
                 machine_type, snr_db=snr_db, augment_train=True, progress_cb=precompute_cb, machine_id=machine_id
@@ -793,11 +796,13 @@ def train():
             np.save(threshold_path, threshold)
             norm_stats_path = _norm_stats_path_for(machine_type, machine_id, snr_db)
             _save_norm_stats(norm_stats_path, norm_stats)
-            _model_cache[_model_key(machine_type, machine_id, snr_db)] = {
+            cache_base = _model_key(machine_type, machine_id, snr_db)
+            _model_cache[cache_base] = {
                 "model": model, "threshold": threshold, "norm_stats": norm_stats,
             }
-            if _model_key(machine_type, machine_id, snr_db) not in state["available_models"]:
-                state["available_models"].append(_model_key(machine_type, machine_id, snr_db))
+            _model_cache[f"{cache_base}:latest"] = _model_cache[cache_base]
+            if cache_base not in state["available_models"]:
+                state["available_models"].append(cache_base)
             state["progress"] = 83
 
             log("Evaluating…")
@@ -985,7 +990,8 @@ def tune():
             log(f"Device: {device}  CUDA={torch.cuda.is_available()}")
 
             def precompute_cb(done, total):
-                pct = 4 + int(done / max(1, total) * 10)
+                capped = min(done, total)
+                pct = 4 + int(capped / max(1, total) * 10)
                 state["progress"] = min(15, pct)
 
             train_ds, val_ds, test_ds, test_labels, _, norm_stats = build_datasets(
@@ -1175,7 +1181,8 @@ def autopilot():
 
             # Build datasets once for speed.
             def precompute_cb(done, total):
-                state["progress"] = min(12, 2 + int(done / max(1, total) * 10))
+                capped = min(done, total)
+                state["progress"] = min(12, 2 + int(capped / max(1, total) * 10))
 
             train_ds, val_ds, test_ds, test_labels, _, norm_stats = build_datasets(
                 machine_type, snr_db=snr_db, augment_train=True, progress_cb=precompute_cb, machine_id=machine_id
@@ -1343,12 +1350,13 @@ def autopilot():
                     "base_channels": int(best_params.get("base_channels", state["train_config"]["base_channels"])),
                 })
 
-                _model_cache[_model_key(machine_type, machine_id, snr_db)] = {
+                cache_base = _model_key(machine_type, machine_id, snr_db)
+                _model_cache[cache_base] = {
                     "model": model, "threshold": threshold, "norm_stats": norm_stats,
                 }
-                key = _model_key(machine_type, machine_id, snr_db)
-                if key not in state["available_models"]:
-                    state["available_models"].append(key)
+                _model_cache[f"{cache_base}:latest"] = _model_cache[cache_base]
+                if cache_base not in state["available_models"]:
+                    state["available_models"].append(cache_base)
 
                 if auc >= target_auc:
                     log(f"[AutoPilot] target reached at round {round_idx}: AUC={auc:.4f}")
@@ -1589,14 +1597,14 @@ def check_upload():
             if snr_db is None:
                 snr_db = int(rec.get("snr", 6))
         else:
+            latest = _latest_model_record(machine_type, machine_id=machine_id)
+            if latest is None:
+                return jsonify({"error": f"No model for '{machine_type}'/{machine_id or 'all'}. Train first."}), 400
             if snr_db is None:
-                latest = _latest_model_record(machine_type, machine_id=machine_id)
-                if latest is None:
-                    return jsonify({"error": f"No model for '{machine_type}'/{machine_id or 'all'}. Train first."}), 400
                 snr_db = int(latest.get("snr", 6))
-            selected_path = _model_path_for(machine_type, machine_id, snr_db)
-            selected_thr_path = _threshold_path_for(machine_type, machine_id, snr_db)
-            selected_norm_path = _norm_stats_path_for(machine_type, machine_id, snr_db)
+            selected_path = Path(ROOT) / latest["model_path"]
+            selected_thr_path = Path(ROOT) / latest["threshold_path"]
+            selected_norm_path = Path(ROOT) / latest["norm_stats_path"] if latest.get("norm_stats_path") else None
 
         if not selected_path.exists():
             return jsonify({"error": f"No model for '{machine_type}'/{machine_id or 'all'}. Train first."}), 400

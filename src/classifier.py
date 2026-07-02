@@ -29,22 +29,36 @@ class DefectClassifier(nn.Module):
 
 
 def extract_latent_features(autoencoder, loader, device: torch.device):
-    """Extract bottleneck features and labels from a DataLoader."""
+    """Extract bottleneck features and labels from a DataLoader.
+
+    Supports two loader formats:
+      - Dataset returns (x, label) tuples → labels array is returned
+      - Dataset returns just x tensor → labels is None
+    Mixed formats within one loader are NOT allowed.
+    """
     autoencoder.eval()
     features = []
     labels = []
+    has_labels = None
     with torch.no_grad():
         for batch in loader:
-            if isinstance(batch, (list, tuple)) and len(batch) == 2:
-                x, y = batch
-                labels.extend(y.numpy())
+            if isinstance(batch, (list, tuple)) and len(batch) >= 2:
+                x, y = batch[0], batch[1]
+                if has_labels is None:
+                    has_labels = True
+                if has_labels:
+                    labels.extend(y.cpu().numpy())
             else:
                 x = batch[0] if isinstance(batch, (list, tuple)) else batch
+                if has_labels is None:
+                    has_labels = False
             x = x.to(device)
             z = autoencoder.encode(x)
             features.append(z.cpu().numpy())
+    if not features:
+        return np.empty((0, 0)), None
     features = np.concatenate(features, axis=0)
-    labels = np.array(labels) if labels else None
+    labels = np.array(labels) if has_labels else None
     return features, labels
 
 

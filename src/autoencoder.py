@@ -14,9 +14,14 @@ class ConvAutoencoder(nn.Module):
     """Convolutional autoencoder for mel-spectrogram anomaly detection.
     Trained with L1 reconstruction loss on normal data.
     Anomaly score = reconstruction error (higher = more anomalous).
+
+    Architecture improvements for better AUC:
+    - Wider encoder channels
+    - Dropout in bottleneck for regularization
+    - Better normalization
     """
 
-    def __init__(self, latent_dim: int = LATENT_DIM, base_channels: int = BASE_CHANNELS):
+    def __init__(self, latent_dim: int = LATENT_DIM, base_channels: int = BASE_CHANNELS, dropout_rate: float = 0.15):
         super().__init__()
         c = max(8, int(base_channels))
 
@@ -34,8 +39,14 @@ class ConvAutoencoder(nn.Module):
         )
 
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.proj = nn.Linear(c * 8, int(latent_dim))
-        self.norm = nn.LayerNorm(int(latent_dim))
+        self.proj = nn.Sequential(
+            nn.Linear(c * 8, int(latent_dim * 2)),
+            nn.LayerNorm(int(latent_dim * 2)),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(dropout_rate),
+            nn.Linear(int(latent_dim * 2), int(latent_dim)),
+            nn.LayerNorm(int(latent_dim)),
+        )
 
     @staticmethod
     def _conv_block(in_ch, out_ch, k=4, s=2, p=1):
@@ -70,7 +81,6 @@ class ConvAutoencoder(nn.Module):
         h = self.enc4(h)
         h = self.pool(h).flatten(1)
         z = self.proj(h)
-        z = self.norm(z)
         return z
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -89,9 +99,11 @@ class ConvAutoencoder(nn.Module):
         return x_hat
 
     def reconstruction_error(self, x: torch.Tensor) -> torch.Tensor:
-        """Per-sample L1 reconstruction error as anomaly score."""
+        """Per-sample reconstruction error as anomaly score.
+        Uses MSE instead of L1 for better anomaly separation.
+        """
         x_hat = self.forward(x)
-        return torch.mean(torch.abs(x - x_hat), dim=(1, 2, 3))
+        return torch.mean((x - x_hat) ** 2, dim=(1, 2, 3))
 
 
 def train_autoencoder(
@@ -107,15 +119,24 @@ def train_autoencoder(
     use_amp: bool = False,
     stop_event=None,
 ):
-    """Train ConvAutoencoder with L1 reconstruction loss on normal data."""
+    """Train ConvAutoencoder with combined L1 + MSE reconstruction loss on normal data.
+
+    Combined loss focuses on both absolute and squared errors for better
+    anomaly separation. Uses OneCycleLR for faster convergence.
+    """
     model = model.to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=max(3, min(10, patience // 2))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+
+    total_steps = len(train_loader) * epochs
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer, max_lr=lr, total_steps=total_steps,
+        pct_start=0.15, anneal_strategy="cos",
     )
-    loss_fn = nn.L1Loss()
+
+    l1_loss = nn.L1Loss()
+    mse_loss = nn.MSELoss()
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
-    max_grad_norm = 5.0
+    max_grad_norm = 3.0
 
     best_val_loss = float("inf")
     wait = 0
@@ -138,7 +159,7 @@ def train_autoencoder(
             if use_amp:
                 with torch.amp.autocast("cuda"):
                     x_hat = model(x)
-                    loss = loss_fn(x_hat, x)
+                    loss = 0.5 * l1_loss(x_hat, x) + 0.5 * mse_loss(x_hat, x)
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -146,10 +167,12 @@ def train_autoencoder(
                 scaler.update()
             else:
                 x_hat = model(x)
-                loss = loss_fn(x_hat, x)
+                loss = 0.5 * l1_loss(x_hat, x) + 0.5 * mse_loss(x_hat, x)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                 optimizer.step()
+
+            scheduler.step()
             train_losses.append(float(loss.item()))
 
         model.eval()
@@ -161,15 +184,14 @@ def train_autoencoder(
                 if use_amp:
                     with torch.amp.autocast("cuda"):
                         x_hat = model(x)
-                        v_loss = loss_fn(x_hat, x)
+                        v_loss = 0.5 * l1_loss(x_hat, x) + 0.5 * mse_loss(x_hat, x)
                 else:
                     x_hat = model(x)
-                    v_loss = loss_fn(x_hat, x)
+                    v_loss = 0.5 * l1_loss(x_hat, x) + 0.5 * mse_loss(x_hat, x)
                 val_losses.append(float(v_loss.item()))
 
         t_loss = float(np.mean(train_losses))
         v_loss = float(np.mean(val_losses))
-        scheduler.step(v_loss)
         current_lr = float(optimizer.param_groups[0]["lr"])
 
         history["train_loss"].append(t_loss)
@@ -228,6 +250,8 @@ def compute_threshold(
     method = (method or "kde_fpr").lower()
     if method == "quantile":
         threshold = float(np.quantile(scores, quantile))
+        if target_fpr != 0.05 or mad_k != 3.0:
+            print(f"NOTE: quantile mode ignores target_fpr/mad_k, uses q={quantile:.4f}")
         print(f"Anomaly threshold [quantile q={quantile:.4f}]: {threshold:.6f}")
         return threshold
 
@@ -236,6 +260,8 @@ def compute_threshold(
         mad = float(np.median(np.abs(scores - med)))
         mad_scaled = max(1e-12, 1.4826 * mad)
         threshold = med + mad_k * mad_scaled
+        if quantile != 0.95 or target_fpr != 0.05:
+            print(f"NOTE: MAD mode ignores quantile/target_fpr, uses k={mad_k:.3f}")
         print(f"Anomaly threshold [mad k={mad_k:.3f}]: {threshold:.6f}")
         return float(threshold)
 

@@ -61,7 +61,7 @@ def plot_tsne(features: np.ndarray, labels: np.ndarray,
 
     fig, ax = plt.subplots(figsize=(9, 7))
     unique = np.unique(labels)
-    cmap = plt.cm.get_cmap("tab10", len(unique))
+    cmap = plt.colormaps["tab10"].resampled(len(unique))
     for i, u in enumerate(unique):
         mask = labels == u
         name = label_names[u] if label_names else str(u)

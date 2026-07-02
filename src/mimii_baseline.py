@@ -120,6 +120,14 @@ def split_baseline_files(
             f"(normal={len(normal_paths)}, abnormal={n_abn})"
         )
 
+    # Need at least 5 normal files for training to avoid underfitting
+    min_train = max(5, n_abn)
+    if len(normal_paths) < min_train + n_abn:
+        raise ValueError(
+            f"Not enough normal files for reliable training: need {min_train + n_abn}, "
+            f"got {len(normal_paths)} (abnormal={n_abn})"
+        )
+
     train_files = normal_paths[n_abn:]
     eval_files = normal_paths[:n_abn] + abnormal_paths
     eval_labels = np.array([0] * n_abn + [1] * n_abn, dtype=np.int64)

@@ -164,7 +164,7 @@ def extract_mfcc(y: np.ndarray, sr: int = SAMPLE_RATE) -> np.ndarray:
 
 def add_noise(y: np.ndarray, noise_level: float = 0.005) -> np.ndarray:
     rng = np.random.default_rng()
-    noise = rng.normal(0, noise_level, y.shape)
+    noise = rng.normal(0, noise_level * rng.uniform(0.5, 1.5), y.shape)
     return y + noise
 
 
@@ -174,30 +174,48 @@ def change_volume(y: np.ndarray, gain_range: tuple = (0.7, 1.3)) -> np.ndarray:
     return y * gain
 
 
-def augment_waveform(y: np.ndarray) -> np.ndarray:
-    """Fast augmentations only (no time_stretch)."""
+def add_impulse_noise(y: np.ndarray, prob: float = 0.01) -> np.ndarray:
+    """Random impulse noise to simulate industrial clicks."""
     rng = np.random.default_rng()
     out = y.copy()
-    if rng.random() < 0.5:
-        out = add_noise(out)
-    if rng.random() < 0.5:
-        out = change_volume(out)
+    n = len(y)
+    n_impulses = max(1, int(n * prob * rng.uniform(0.5, 2.0)))
+    idx = rng.integers(0, n, n_impulses)
+    amplitudes = rng.uniform(0.1, 0.5, n_impulses) * rng.choice([-1, 1], n_impulses)
+    out[idx] += amplitudes
     return out
 
 
-def spec_augment(mel: torch.Tensor, freq_mask_param: int = 8, time_mask_param: int = 16) -> torch.Tensor:
-    """SpecAugment on mel tensor (1, n_mels, T) — runs on GPU."""
-    rng = torch.rand(2)
+def augment_waveform(y: np.ndarray) -> np.ndarray:
+    """Augmentations for normal training samples."""
+    rng = np.random.default_rng()
+    out = y.copy()
+    if rng.random() < 0.4:
+        out = add_noise(out, noise_level=rng.uniform(0.002, 0.01))
+    if rng.random() < 0.4:
+        out = change_volume(out)
+    if rng.random() < 0.3:
+        out = add_impulse_noise(out, prob=rng.uniform(0.005, 0.02))
+    return out
+
+
+def spec_augment(mel: torch.Tensor, freq_mask_param: int = 12, time_mask_param: int = 24) -> torch.Tensor:
+    """SpecAugment on mel tensor (1, n_mels, T) — runs on GPU.
+    More aggressive masking than default to improve generalization.
+    """
+    rng = torch.rand(3)
+    mel = mel.clone()
     if rng[0] < 0.5:
-        f = torch.randint(1, freq_mask_param + 1, (1,)).item()
-        f0 = torch.randint(0, mel.shape[1] - f + 1, (1,)).item()
-        mel = mel.clone()
+        f = torch.randint(2, freq_mask_param + 1, (1,)).item()
+        f0 = torch.randint(0, max(1, mel.shape[1] - f + 1), (1,)).item()
         mel[:, f0:f0 + f, :] = 0.0
     if rng[1] < 0.5:
-        t = torch.randint(1, time_mask_param + 1, (1,)).item()
-        t0 = torch.randint(0, mel.shape[2] - t + 1, (1,)).item()
-        mel = mel.clone()
+        t = torch.randint(2, time_mask_param + 1, (1,)).item()
+        t0 = torch.randint(0, max(1, mel.shape[2] - t + 1), (1,)).item()
         mel[:, :, t0:t0 + t] = 0.0
+    if rng[2] < 0.2:
+        add_channel_noise = torch.randn_like(mel) * 0.02
+        mel = mel + add_channel_noise
     return mel
 
 
@@ -292,7 +310,6 @@ def build_datasets(machine_type: str, snr_db: int = 6,
     n_normal_files = sum(len(v) for v in files_info["normal"].values())
     n_abnormal_files = sum(len(v) for v in files_info["abnormal"].values())
     total_files = n_normal_files + n_abnormal_files
-    processed_files = [0]
 
     for mid, paths in files_info["normal"].items():
         normal_paths.extend(paths)
@@ -308,16 +325,16 @@ def build_datasets(machine_type: str, snr_db: int = 6,
     file_idx = rng.permutation(n_files)
     n_test_files = max(1, int(n_files * test_ratio))
     n_val_files = max(1, int(n_files * val_ratio))
-    n_train_files = n_files - n_test_files - n_val_files
 
-    # Keep all three splits non-empty for stable threshold/eval.
-    while n_train_files < 1 and n_test_files > 1:
-        n_test_files -= 1
-        n_train_files = n_files - n_test_files - n_val_files
-    while n_train_files < 1 and n_val_files > 1:
-        n_val_files -= 1
-        n_train_files = n_files - n_test_files - n_val_files
-    n_train_files = max(1, n_train_files)
+    # Ensure train split has at least 1 file.
+    while n_test_files + n_val_files >= n_files:
+        if n_test_files > 1:
+            n_test_files -= 1
+        elif n_val_files > 1:
+            n_val_files -= 1
+        else:
+            break
+    n_train_files = max(1, n_files - n_test_files - n_val_files)
 
     test_file_idx = file_idx[:n_test_files]
     val_file_idx = file_idx[n_test_files:n_test_files + n_val_files]
@@ -327,10 +344,14 @@ def build_datasets(machine_type: str, snr_db: int = 6,
     val_files = [normal_paths[i] for i in val_file_idx]
     test_normal_files = [normal_paths[i] for i in test_file_idx]
 
+    processed_files = [0]
     train_windows = _windows_from_files(train_files, progress_cb=progress_cb, processed_ref=processed_files, total_files=total_files)
+    processed_files = [0]
     val_normal_windows = _windows_from_files(val_files, progress_cb=progress_cb, processed_ref=processed_files, total_files=total_files)
+    processed_files = [0]
     test_normal_windows = _windows_from_files(test_normal_files, progress_cb=progress_cb, processed_ref=processed_files, total_files=total_files)
 
+    processed_files = [0]
     for mid, paths in files_info["abnormal"].items():
         for p in paths:
             y = load_audio(p)
@@ -338,8 +359,8 @@ def build_datasets(machine_type: str, snr_db: int = 6,
             abnormal_windows.extend(wins)
             abnormal_ids.extend([mid] * len(wins))
             processed_files[0] += 1
-            if progress_cb and (processed_files[0] % 25 == 0 or processed_files[0] == total_files):
-                progress_cb(processed_files[0], total_files)
+            if progress_cb and (processed_files[0] % 25 == 0 or processed_files[0] == n_abnormal_files):
+                progress_cb(processed_files[0], n_abnormal_files)
 
     test_windows = test_normal_windows + abnormal_windows
     test_labels = np.array(
@@ -403,7 +424,7 @@ def file_to_vector_array(wav_path: Path,
     mel = librosa.feature.melspectrogram(
         y=y, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, power=power
     )
-    log_mel = 20.0 / power * np.log10(mel + sys.float_info.epsilon)
+    log_mel = 20.0 / power * np.log10(mel + 1e-10)
     dims = n_mels * frames
     n_vec = log_mel.shape[1] - frames + 1
     if n_vec < 1:
@@ -490,6 +511,13 @@ def build_baseline_datasets(machine_type: str, snr_db: int = 6,
     file_idx = rng.permutation(n_files)
     n_test = max(1, int(n_files * test_ratio))
     n_val = max(1, int(n_files * val_ratio))
+    while n_test + n_val >= n_files:
+        if n_test > 1:
+            n_test -= 1
+        elif n_val > 1:
+            n_val -= 1
+        else:
+            break
     n_train = max(1, n_files - n_test - n_val)
 
     test_idx = file_idx[:n_test]
