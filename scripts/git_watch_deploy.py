@@ -57,7 +57,7 @@ def _fetch(git_exe: str) -> bool:
 
 def _pull(git_exe: str) -> tuple[bool, str]:
     p = subprocess.run(
-        [git_exe, "pull", "--ff-only", "origin", "main"],
+        [git_exe, "pull", "--rebase", "origin", "main"],
         cwd=ROOT,
         capture_output=True,
         text=True,

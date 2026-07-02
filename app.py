@@ -1733,7 +1733,7 @@ def deploy():
     if do_pull:
         try:
             proc = subprocess.run(
-                [_git_executable(), "pull", "--ff-only"],
+                [_git_executable(), "pull", "--rebase"],
                 cwd=ROOT,
                 capture_output=True,
                 text=True,
