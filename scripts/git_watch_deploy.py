@@ -55,16 +55,50 @@ def _fetch(git_exe: str) -> bool:
     return p.returncode == 0
 
 
+def _stash(git_exe: str) -> None:
+    subprocess.run(
+        [git_exe, "stash", "-u"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
 def _pull(git_exe: str) -> tuple[bool, str]:
     p = subprocess.run(
-        [git_exe, "pull", "--rebase", "origin", "main"],
+        [git_exe, "pull", "--ff-only", "origin", "main"],
         cwd=ROOT,
         capture_output=True,
         text=True,
         timeout=120,
     )
     out = (p.stdout or "") + (p.stderr or "")
-    return p.returncode == 0, out.strip()
+    if p.returncode == 0:
+        return True, out.strip()
+
+    # local changes blocking pull — stash and retry
+    _stash(git_exe)
+    p2 = subprocess.run(
+        [git_exe, "pull", "--ff-only", "origin", "main"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    out2 = (p2.stdout or "") + (p2.stderr or "")
+    if p2.returncode == 0:
+        return True, out2.strip()
+
+    # diverged history (force-push) — hard reset to origin/main
+    subprocess.run(
+        [git_exe, "reset", "--hard", "origin/main"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return True, "reset --hard origin/main"
 
 
 def _restart_app() -> None:

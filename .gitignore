@@ -1,13 +1,20 @@
 # datasets (large, local only)
 data/
+dataset/
 results/
+result/
 
 # GitHub file limit 100MB
 models/history/fan_20260630_221402.pt
 
+# trained models / checkpoints (regenerated locally)
+models/
+model/
+
 # secrets & env
 .env
 .env.*
+!.env.example
 *.pem
 id_rsa*
 ngrok.yml
@@ -15,6 +22,8 @@ ngrok.yml
 # logs
 *.log
 app_err.log
+response.json
+baseline.log
 
 # python
 __pycache__/
@@ -45,5 +54,15 @@ Thumbs.db
 uploads/
 tmp/
 
+# baseline artifacts
+pickle/
+
 # local notes with secrets
 FRIEND_CREDENTIALS.txt
+OPERATIONS_RU.md
+
+# external baseline snapshot (integrated into src/)
+mimii_baseline-master/
+
+# local rollback backup
+old_ript/

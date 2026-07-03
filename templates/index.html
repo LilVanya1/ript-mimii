@@ -2,628 +2,637 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Acoustic Diagnostics — MIMII</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MIMII Baseline GUI</title>
 <style>
+:root {
+  --bg: #0a0e14;
+  --bg2: #10161e;
+  --card: #161d27;
+  --card-border: #1e2a38;
+  --text: #d1d5db;
+  --text-dim: #6b7a8f;
+  --accent: #3b82f6;
+  --accent-glow: rgba(59,130,246,0.15);
+  --green: #22c55e;
+  --green-bg: rgba(34,197,94,0.1);
+  --red: #ef4444;
+  --red-bg: rgba(239,68,68,0.1);
+  --yellow: #eab308;
+  --yellow-bg: rgba(234,179,8,0.1);
+}
 *{margin:0;padding:0;box-sizing:border-box}
-:root{
-  --bg:#0f0f13;--surface:#1a1a24;--surface2:#22222f;--border:#2a2a3a;
-  --text:#e4e4ef;--text2:#8888a0;--accent:#6c5ce7;--accent2:#a29bfe;
-  --green:#00b894;--red:#ff6b6b;--orange:#fdcb6e;--blue:#74b9ff;
-}
-body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
-.container{max-width:1200px;margin:0 auto;padding:20px}
+body{font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
+::selection{background:var(--accent);color:#fff}
 
-header{background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);border-bottom:1px solid var(--border);padding:26px 0;text-align:center}
-header h1{font-size:26px;font-weight:700;letter-spacing:-.5px}
-header p{color:var(--text2);font-size:13px;margin-top:4px}
-.badge{display:inline-block;background:var(--accent);color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;margin-left:8px;vertical-align:middle}
+/* Header */
+.header{background:linear-gradient(135deg,#0f1729,#1a2338);border-bottom:1px solid var(--card-border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;backdrop-filter:blur(12px)}
+.header h1{font-size:17px;font-weight:700;letter-spacing:-.02em;background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.header .sub{color:var(--text-dim);font-size:12px;margin-left:10px;-webkit-text-fill-color:var(--text-dim)}
+.status-badge{display:inline-flex;align-items:center;gap:7px;padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;transition:all .3s}
+.status-badge.idle{background:var(--accent-glow);color:var(--accent);border:1px solid rgba(59,130,246,0.2)}
+.status-badge.running{background:var(--green-bg);color:var(--green);border:1px solid rgba(34,197,94,0.2);box-shadow:0 0 20px rgba(34,197,94,0.1)}
+.status-badge .dot{width:7px;height:7px;border-radius:50%}
+.status-badge.idle .dot{background:var(--accent)}
+.status-badge.running .dot{background:var(--green);animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(0.7)}}
 
-.layout{display:grid;grid-template-columns:340px 1fr;gap:20px;margin-top:20px}
-.panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px}
-.panel h2{font-size:15px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+/* Tabs */
+.tabs{display:flex;border-bottom:1px solid var(--card-border);background:var(--bg2);padding:0 24px;gap:0}
+.tab{padding:12px 22px;cursor:pointer;color:var(--text-dim);font-size:13px;font-weight:500;border-bottom:2px solid transparent;transition:all .2s;user-select:none;display:flex;align-items:center;gap:7px}
+.tab:hover{color:var(--text);background:rgba(255,255,255,0.02)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-content{display:none;padding:24px 28px;animation:fadeIn .25s ease}
+.tab-content.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 
-label{display:block;font-size:13px;color:var(--text2);margin-bottom:4px;margin-top:12px}
-label:first-child{margin-top:0}
-select,input[type=number],input[type=file]{
-  width:100%;padding:9px 12px;background:var(--surface2);border:1px solid var(--border);
-  border-radius:8px;color:var(--text);font-size:14px;outline:none;transition:border .2s;
-}
-select:focus,input:focus{border-color:var(--accent)}
+/* Cards */
+.card{background:var(--card);border:1px solid var(--card-border);border-radius:12px;margin-bottom:18px;overflow:hidden;transition:border-color .2s}
+.card:hover{border-color:#25364a}
+.card-header{padding:14px 20px;border-bottom:1px solid var(--card-border);font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;justify-content:space-between;letter-spacing:.01em}
+.card-header .icon{color:var(--text-dim);margin-right:8px}
+.card-body{padding:18px 20px}
 
-.btn{width:100%;padding:11px;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;margin-top:12px}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-primary:hover:not(:disabled){background:var(--accent2);transform:translateY(-1px)}
-.btn-primary:disabled{opacity:.45;cursor:not-allowed;transform:none}
-.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
-.btn-secondary:hover:not(:disabled){border-color:var(--accent)}
+/* Tables */
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+th{padding:10px 14px;text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);border-bottom:1px solid var(--card-border);background:rgba(255,255,255,0.01)}
+td{padding:10px 14px;border-bottom:1px solid rgba(30,42,56,0.5)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,0.02)}
 
-.progress-wrap{margin-top:12px}
-.progress-bar{height:6px;background:var(--surface2);border-radius:3px;overflow:hidden}
-.progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:3px;transition:width .4s;width:0%}
-.progress-text{font-size:12px;color:var(--text2);margin-top:4px;text-align:right}
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border-radius:8px;border:1px solid transparent;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;user-select:none;white-space:nowrap}
+.btn:active{transform:scale(0.97)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:#2563eb;box-shadow:0 0 20px var(--accent-glow)}
+.btn-danger{background:var(--red);border-color:var(--red);color:#fff}
+.btn-danger:hover{background:#dc2626;box-shadow:0 0 20px rgba(239,68,68,0.2)}
+.btn-secondary{background:var(--bg2);border-color:var(--card-border);color:var(--text)}
+.btn-secondary:hover{background:#1c2a3a;border-color:#2a3a4e}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important}
 
-.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
-.status-dot.idle{background:var(--green)}
-.status-dot.running{background:var(--orange);animation:pulse 1s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+/* Inputs */
+input[type=file],input[type=text],input[type=number],select{background:var(--bg);border:1px solid var(--card-border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:13px;width:100%;transition:border-color .2s}
+input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+input[type=file]::file-selector-button{background:var(--bg2);border:1px solid var(--card-border);border-radius:6px;color:var(--text);padding:5px 12px;cursor:pointer;margin-right:10px;transition:all .2s}
+input[type=file]::file-selector-button:hover{background:var(--card-border)}
+label{display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
 
-.log-box{background:#0a0a10;border:1px solid var(--border);border-radius:8px;padding:12px;
-  font-family:'Cascadia Code',monospace;font-size:12px;line-height:1.6;
-  max-height:240px;overflow-y:auto;color:var(--text2);margin-top:10px;white-space:pre-wrap;word-break:break-all}
-.log-box .err{color:var(--red)}.log-box .ok{color:var(--green)}.log-box .warn{color:var(--orange)}
+/* Log box */
+.log-box{background:var(--bg);border:1px solid var(--card-border);border-radius:8px;padding:12px;height:320px;overflow-y:auto;font-family:'JetBrains Mono','Cascadia Code','Fira Code','Consolas',monospace;font-size:12px;line-height:1.7}
+.log-box .log-line{color:var(--text-dim);white-space:pre-wrap;padding:1px 0}
+.log-box .log-line:nth-child(odd){background:rgba(255,255,255,0.01)}
 
-/* left tabs */
-.ltab-bar{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:16px}
-.ltab{padding:7px 14px;font-size:13px;font-weight:500;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s}
-.ltab:hover{color:var(--text)}.ltab.active{color:var(--accent2);border-bottom-color:var(--accent)}
-.ltab-content{display:none}.ltab-content.active{display:block}
+/* Progress */
+.progress-item{padding:8px 0;border-bottom:1px solid rgba(30,42,56,0.5);font-size:13px;display:flex;align-items:center;gap:12px}
+.progress-item:last-child{border-bottom:none}
+.status-done{color:var(--green)}
+.status-processing{color:var(--yellow)}
+.status-error{color:var(--red)}
+.auc-value{font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
 
-/* right tabs */
-.tab-bar{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border)}
-.tab{padding:8px 16px;font-size:13px;font-weight:500;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s}
-.tab:hover{color:var(--text)}.tab.active{color:var(--accent2);border-bottom-color:var(--accent)}
-.tab-content{display:none}.tab-content.active{display:block}
+/* Empty state */
+.empty-state{text-align:center;padding:48px 20px;color:var(--text-dim)}
+.empty-state .icon{font-size:36px;margin-bottom:10px;opacity:.5}
 
-/* metrics */
-.metric-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
-.metric-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center}
-.metric-card .val{font-size:24px;font-weight:700;margin:6px 0}
-.metric-card .lbl{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.8px}
-.good .val{color:var(--green)}.warn .val{color:var(--orange)}.bad .val{color:var(--red)}
+/* Grid */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:900px){.grid-2{grid-template-columns:1fr}}
 
-/* images */
-.imgs-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
-.img-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .2s,border-color .2s}
-.img-card:hover{transform:scale(1.02);border-color:var(--accent)}
-.img-card img{width:100%;display:block}
-.img-card .cap{padding:7px 12px;font-size:12px;color:var(--text2)}
+/* Result badges */
+.result-badge{background:var(--bg2);border-radius:8px;padding:8px 16px;font-size:13px;display:flex;justify-content:space-between;gap:16px;min-width:140px;border:1px solid var(--card-border)}
+.result-badge .label{color:var(--text-dim);font-size:12px}
+.result-badge .value{color:var(--accent);font-weight:700;font-variant-numeric:tabular-nums}
 
-/* SNR table */
-.snr-table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}
-.snr-table th,.snr-table td{padding:9px 14px;text-align:center;border-bottom:1px solid var(--border)}
-.snr-table th{color:var(--text2);font-size:12px;text-transform:uppercase;letter-spacing:.5px;font-weight:500}
-.snr-table td{font-weight:600}
+/* Predict */
+.predict-result{background:var(--bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;text-align:center;margin-top:10px}
+.predict-result .big-score{font-size:42px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums;line-height:1}
+.predict-result .big-score.high{color:var(--red)}
+.predict-result .label{color:var(--text-dim);font-size:13px;margin-top:6px}
+.hidden{display:none!important}
 
-/* report */
-.report-block{background:#0a0a10;border:1px solid var(--border);border-radius:8px;padding:14px;
-  font-family:monospace;font-size:12px;white-space:pre-wrap;max-height:300px;overflow-y:auto;color:var(--text2);margin-top:8px}
+/* Config grid */
+.config-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+.config-grid .field{background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid var(--card-border);transition:border-color .2s}
+.config-grid .field:hover{border-color:var(--accent)}
+.config-grid .field:has(:focus){border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+.config-grid .field label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:3px}
+.config-grid .field input,.config-grid .field select{background:transparent;border:none;padding:4px 0;color:var(--text);font-size:13px;width:100%;font-weight:500;cursor:pointer}
+.config-grid .field input:focus,.config-grid .field select:focus{outline:none;box-shadow:none}
 
-/* check results */
-.res-table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}
-.res-table th,.res-table td{padding:9px 14px;border-bottom:1px solid var(--border)}
-.res-table th{color:var(--text2);font-size:12px;text-transform:uppercase;letter-spacing:.5px;font-weight:500;text-align:center}
-.res-table td{font-weight:600;text-align:center}
-.res-table td:first-child{text-align:left;font-weight:400}
-.clr-good{color:var(--green)}.clr-bad{color:var(--red)}
+/* Checkboxes */
+input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:pointer}
 
-.models-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.model-tag{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:13px;font-weight:600;color:var(--accent2)}
-.device-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
-.device-badge.cuda{background:#2d1b69;color:var(--accent2)}.device-badge.cpu{background:#1b3a2d;color:var(--green)}
+/* Detail panel */
+.detail-panel{background:var(--bg);border-radius:10px;padding:16px 20px;margin:6px 0;border:1px solid var(--card-border)}
 
-.empty{text-align:center;padding:40px;color:var(--text2)}
-.empty .icon{font-size:44px;margin-bottom:12px}.empty p{font-size:14px}
+/* Histogram */
+.hist-container{display:flex;align-items:flex-end;height:80px;gap:2px;margin-top:6px}
+.hist-bar-group{flex:1;display:flex;flex-direction:column-reverse;align-items:center;min-width:0}
+.hist-bar-n{width:100%;background:var(--green);border-radius:2px 2px 0 0;opacity:.7;transition:height .3s}
+.hist-bar-a{width:100%;background:var(--red);border-radius:2px 2px 0 0;opacity:.7;transition:height .3s}
+.hist-label{font-size:8px;color:var(--text-dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:center}
 
-/* modal */
-.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;z-index:999;cursor:zoom-out}
-.modal.show{display:flex}.modal img{max-width:92%;max-height:92%;border-radius:8px}
+/* Animations */
+@keyframes slideDown{from{opacity:0;max-height:0}to{opacity:1;max-height:500px}}
+.detail-row{animation:slideDown .25s ease}
 
-@media(max-width:900px){.layout{grid-template-columns:1fr}.metric-row,.imgs-grid{grid-template-columns:1fr 1fr}}
+/* Scrollbar */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#2a3a4e}
+
+/* Tooltip for config field */
+.config-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;margin-left:8px}
+.config-badge.active{background:var(--green-bg);color:var(--green)}
+.config-badge.inactive{background:var(--red-bg);color:var(--red)}
 </style>
 </head>
 <body>
 
-<header>
-  <div class="container">
-    <h1>Acoustic Diagnostics <span class="badge">MIMII</span></h1>
-    <p>Предиктивное обслуживание промышленного оборудования по звуку — pyod AudioAE</p>
+<div class="header">
+  <div style="display:flex;align-items:center;gap:10px">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <h1>MIMII Baseline</h1>
+    <span class="sub">PyTorch · VAE</span>
   </div>
-</header>
+  <div style="display:flex;align-items:center;gap:14px">
+    <span id="currentTarget" style="font-size:12px;color:var(--text-dim);font-weight:500;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+    <span class="status-badge idle" id="statusBadge">
+      <span class="dot"></span>
+      <span id="statusText">Idle</span>
+    </span>
+  </div>
+</div>
 
-<div class="container">
-<div class="layout">
+<div class="tabs" id="tabs">
+  <div class="tab active" data-tab="datasets"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Датасеты</div>
+  <div class="tab" data-tab="training"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>Обучение</div>
+  <div class="tab" data-tab="results"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Результаты</div>
+  <div class="tab" data-tab="test"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>Тестирование</div>
+  <div class="tab" data-tab="logs"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Логи</div>
+</div>
 
-  <!-- LEFT -->
-  <div>
-    <div class="panel">
-      <h2>⚙️ Управление</h2>
+<!-- ============ DATASETS TAB ============ -->
+<div class="tab-content active" id="tab-datasets">
+  <div class="card">
+    <div class="card-header">
+      <span><span class="icon">📂</span>Доступные датасеты</span>
+      <button class="btn btn-secondary" onclick="refreshDatasets()" style="padding:6px 14px;font-size:12px">⟳ Обновить</button>
+    </div>
+    <div class="card-body" style="padding:8px 0">
+      <div id="datasetTable"><div class="empty-state"><div class="icon">📂</div><p>Загрузка...</p></div></div>
+    </div>
+  </div>
+</div>
 
-      <div class="ltab-bar">
-        <div class="ltab active" data-t="download" onclick="switchLeft(this)">📥 Данные</div>
-        <div class="ltab" data-t="train" onclick="switchLeft(this)">🚀 Обучение</div>
-        <div class="ltab" data-t="test"  onclick="switchLeft(this)">🔍 Проверка</div>
+<!-- ============ TRAINING TAB ============ -->
+<div class="tab-content" id="tab-training">
+  <div class="card">
+    <div class="card-header">
+      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;vertical-align:middle"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>Конфигурация модели</span>
+      <span style="display:flex;gap:6px">
+        <button class="btn btn-secondary" onclick="loadConfig()" style="padding:6px 14px;font-size:12px">⟳ Загрузить</button>
+        <button class="btn btn-primary" onclick="saveConfig()" style="padding:6px 14px;font-size:12px">✓ Сохранить</button>
+      </span>
+    </div>
+    <div class="card-body">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:12px;color:var(--text-dim)">
+        <span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green)"></span> Активные параметры</span>
+        <span style="color:var(--card-border)">·</span>
+        <span>Изменения применяются при следующем запуске обучения</span>
       </div>
-
-      <div class="ltab-content active" id="lc-download">
-        <label>Тип машины</label>
-        <select id="dl-machine">
-          <option value="fan">Fan (вентилятор)</option>
-          <option value="pump">Pump (насос)</option>
-          <option value="slider">Slider</option>
-          <option value="valve">Valve</option>
-        </select>
-        <button class="btn btn-secondary" id="btnDownload" onclick="doDownload()">📥 Скачать MIMII</button>
+      <div class="config-grid">
+        <div class="field"><label>model_type</label>
+          <select id="cfg_model_type"><option value="ae">AE</option><option value="vae" selected>VAE</option><option value="cnn">CNN</option></select></div>
+        <div class="field"><label>epochs</label>
+          <input type="number" id="cfg_epochs" value="200"></div>
+        <div class="field"><label>learning_rate</label>
+          <input type="number" step="0.0001" id="cfg_lr" value="0.001"></div>
+        <div class="field"><label>bottleneck</label>
+          <input type="number" id="cfg_bottleneck" value="3"></div>
+        <div class="field"><label>beta (VAE)</label>
+          <input type="number" step="0.01" id="cfg_beta" value="0.1"></div>
+        <div class="field"><label>denoising_std</label>
+          <input type="number" step="0.01" id="cfg_denoising" value="0.1"></div>
+        <div class="field"><label>score_mode</label>
+          <select id="cfg_score_mode"><option value="max">max</option><option value="mean">mean</option><option value="p95">p95</option></select></div>
       </div>
+    </div>
+  </div>
 
-      <div class="ltab-content" id="lc-train">
-        <label>Тип машины</label>
-        <select id="tr-machine" onchange="refreshModelSelectors()">
-          <option value="fan">Fan</option><option value="pump">Pump</option>
-          <option value="slider">Slider</option><option value="valve">Valve</option>
-        </select>
-        <label>ID машины</label>
-        <select id="tr-machine-id">
-          <option value="id_00">id_00</option>
-          <option value="id_02">id_02</option>
-          <option value="id_04">id_04</option>
-          <option value="id_06">id_06</option>
-        </select>
-        <label>SNR</label>
-        <select id="tr-snr">
-          <option value="6">6 dB (чистый)</option>
-          <option value="0">0 dB</option>
-          <option value="-6">-6 dB (сильный шум)</option>
-        </select>
-        <label>Режим</label>
-        <select id="tr-mode">
-          <option value="new">New (с нуля)</option>
-          <option value="finetune">Finetune (дообучить)</option>
-        <label>Архитектура</label>
-        <select id="tr-backend" onchange="applyTrainBackendDefaults()">
-          <option value="mobilenet">MobileNet one-class (текущая)</option>
-          <option value="mimii_baseline">MIMII baseline AE (офиц. порт)</option>
-        </select>
-        <label>Эпохи</label>
-        <input id="tr-epochs" type="number" min="1" max="500" value="90">
-        <label>Batch size</label>
-        <input id="tr-batch" type="number" min="1" max="4096" value="96">
-        <label>Learning rate</label>
-        <input id="tr-lr" type="number" step="0.000001" min="0.000001" max="1" value="0.0003">
-        <label>Patience</label>
-        <input id="tr-patience" type="number" min="1" max="200" value="12">
-        <label>Quantile (threshold)</label>
-        <input id="tr-quantile" type="number" step="0.001" min="0.5" max="0.999" value="0.90">
-        <label>Threshold method</label>
-        <select id="tr-th-method">
-          <option value="mad">MAD (recommended)</option>
-          <option value="quantile">Quantile</option>
-          <option value="kde_fpr">KDE + target FPR</option>
-        </select>
-        <label>Target FPR (for KDE)</label>
-        <input id="tr-target-fpr" type="number" step="0.001" min="0.001" max="0.5" value="0.05">
-        <label>MAD k (for MAD)</label>
-        <input id="tr-mad-k" type="number" step="0.1" min="0.5" max="20" value="2.2">
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <button class="btn btn-primary" id="btnTrain" onclick="doTrain()" style="flex:1">🚀 Обучить</button>
-          <button class="btn btn-secondary" id="btnStop" onclick="doStop()" style="flex:0;padding:11px 16px;display:none">⏹ Стоп</button>
+  <div class="card">
+    <div class="card-header">
+      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;vertical-align:middle"><polygon points="5 3 19 12 5 21 5 3"/></svg>Управление обучением</span>
+    </div>
+    <div class="card-body">
+      <div class="btn-group">
+        <button class="btn btn-primary" id="btnTrainAll" onclick="startTrain(null)">▶ Обучить все</button>
+        <button class="btn btn-primary" id="btnTrainSelected" onclick="startTrainSelected()">▶ Обучить выбранные</button>
+        <button class="btn btn-danger" id="btnStop" onclick="stopTrain()" disabled>⏹ Остановить</button>
+      </div>
+      <div id="trainingProgress"><div class="empty-state" style="padding:24px"><p>Выберите датасеты и начните обучение</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ RESULTS TAB ============ -->
+<div class="tab-content" id="tab-results">
+  <div class="card">
+    <div class="card-header">
+      <span><span class="icon">📊</span>Результаты</span>
+      <button class="btn btn-secondary" onclick="refreshResults()" style="padding:6px 14px;font-size:12px">⟳ Обновить</button>
+    </div>
+    <div class="card-body" id="resultsContainer">
+      <div class="empty-state"><div class="icon">📊</div><p>Нет результатов. Запустите обучение.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TEST TAB ============ -->
+<div class="tab-content" id="tab-test">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><span>🎤 Загрузить аудиофайл</span></div>
+      <div class="card-body">
+        <div class="field" style="margin-bottom:10px"><label>Модель</label>
+          <select id="testModelSelect"><option value="">Выберите модель...</option></select></div>
+        <div class="field" style="margin-bottom:12px"><label>Аудиофайл</label>
+          <input type="file" id="testFileInput" accept=".wav,.mp3,.flac,.ogg"></div>
+        <button class="btn btn-primary" onclick="predictFile()" style="width:100%;justify-content:center">Протестировать</button>
+        <div id="predictResult" class="hidden">
+          <div class="predict-result">
+            <div class="label">Оценка аномальности</div>
+            <div class="big-score" id="scoreDisplay">0.000000</div>
+            <div style="color:var(--text-dim);font-size:12px;margin-top:4px">выше = более аномально</div>
+          </div>
         </div>
-        <label style="margin-top:14px">AutoTune trials</label>
-        <input id="tu-trials" type="number" min="3" max="200" value="12">
-        <label>AutoTune epochs/trial</label>
-        <input id="tu-epochs" type="number" min="5" max="120" value="20">
-        <label>AutoTune patience</label>
-        <input id="tu-patience" type="number" min="2" max="30" value="5">
-        <button class="btn btn-secondary" id="btnTune" onclick="doTune()">🧠 AutoTune (Optuna)</button>
-        <label style="margin-top:14px">AutoPilot target AUC</label>
-        <input id="ap-target-auc" type="number" min="0.50" max="0.99" step="0.01" value="0.89">
-        <label>AutoPilot max rounds</label>
-        <input id="ap-max-rounds" type="number" min="1" max="10" value="3">
-        <label>Trials per round</label>
-        <input id="ap-trials-round" type="number" min="3" max="80" value="10">
-        <button class="btn btn-secondary" id="btnAutopilot" onclick="doAutopilot()">🤖 AutoPilot</button>
-      </div>
-
-      <div class="ltab-content" id="lc-test">
-        <label>Тип машины</label>
-        <select id="te-machine" onchange="refreshModelSelectors()">
-          <option value="fan">Fan</option><option value="pump">Pump</option>
-          <option value="slider">Slider</option><option value="valve">Valve</option>
-        </select>
-        <label>ID машины</label>
-        <select id="te-machine-id">
-          <option value="id_00">id_00</option>
-          <option value="id_02">id_02</option>
-          <option value="id_04">id_04</option>
-          <option value="id_06">id_06</option>
-        </select>
-        <label>SNR модели</label>
-        <select id="te-snr" onchange="refreshModelSelectors()">
-          <option value="6">6 dB</option>
-          <option value="0">0 dB</option>
-          <option value="-6">-6 dB</option>
-        </select>
-        <label>Модель для проверки</label>
-        <select id="te-model"></select>
-        <label>Порог (пусто = из модели)</label>
-        <input id="te-thr" type="number" step="0.000001" min="0" placeholder="авто">
-        <label>WAV-файлы</label>
-        <input id="te-files" type="file" accept=".wav,audio/wav" multiple>
-        <button class="btn btn-primary" id="btnCheck" onclick="doCheck()">✅ Проверить</button>
-      </div>
-
-      <div class="progress-wrap">
-        <div class="progress-bar"><div class="progress-fill" id="pFill"></div></div>
-        <div class="progress-text" id="pText">—</div>
       </div>
     </div>
-
-    <div class="panel" style="margin-top:16px">
-      <h2><span class="status-dot idle" id="sDot"></span><span id="sTxt">Готов</span></h2>
-      <div class="log-box" id="startupLog" style="max-height:60px"></div>
-      <div class="log-box" id="runLog">Ожидание…</div>
-    </div>
-
-    <div class="panel" style="margin-top:16px">
-      <h2>🖥 Сервер</h2>
-      <div>Device: <span id="devBadge" class="device-badge cpu">CPU</span></div>
-      <div style="margin-top:10px;font-size:13px;color:var(--text2)">Модели:</div>
-      <div class="models-list" id="modelsList"><span style="color:var(--text2);font-size:13px">нет</span></div>
-    </div>
-  </div>
-
-  <!-- RIGHT -->
-  <div>
-    <div class="panel">
-      <div class="tab-bar">
-        <div class="tab active" data-tab="metrics"  onclick="switchRight(this)">📊 Метрики</div>
-        <div class="tab"        data-tab="charts"   onclick="switchRight(this)">📈 Графики</div>
-        <div class="tab"        data-tab="snr"      onclick="switchRight(this)">🔊 SNR</div>
-        <div class="tab"        data-tab="report"   onclick="switchRight(this)">📝 Отчёт</div>
-        <div class="tab"        data-tab="check"    onclick="switchRight(this)">🔍 Проверка</div>
-      </div>
-
-      <div class="tab-content active" id="tab-metrics">
-        <div id="metricsContent"><div class="empty"><div class="icon">📊</div><p>Запустите обучение</p></div></div>
-      </div>
-      <div class="tab-content" id="tab-charts">
-        <div id="chartsContent"><div class="empty"><div class="icon">📈</div><p>Графики появятся после обучения</p></div></div>
-      </div>
-      <div class="tab-content" id="tab-snr">
-        <div id="snrContent"><div class="empty"><div class="icon">🔊</div><p>SNR-анализ появится после обучения</p></div></div>
-      </div>
-      <div class="tab-content" id="tab-report">
-        <div id="reportContent"><div class="empty"><div class="icon">📝</div><p>Отчёт появится после обучения</p></div></div>
-      </div>
-      <div class="tab-content" id="tab-check">
-        <div id="checkContent"><div class="empty"><div class="icon">🎧</div><p>Загрузите WAV-файлы и нажмите Проверить</p></div></div>
+    <div class="card">
+      <div class="card-header"><span>📁 Файл из eval-набора</span></div>
+      <div class="card-body">
+        <div class="field" style="margin-bottom:10px"><label>Модель</label>
+          <select id="testModelSelect2"><option value="">Выберите модель...</option></select></div>
+        <div class="field" style="margin-bottom:12px"><label>Файл</label>
+          <select id="testEvalFile" style="margin-bottom:4px"><option value="">Нет загруженных моделей</option></select></div>
+        <button class="btn btn-primary" onclick="predictEval()" style="width:100%;justify-content:center">Протестировать</button>
+        <div id="predictResult2" class="hidden">
+          <div class="predict-result">
+            <div class="label">Оценка аномальности</div>
+            <div class="big-score" id="scoreDisplay2">0.000000</div>
+            <div style="color:var(--text-dim);font-size:12px;margin-top:4px">выше = более аномально</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
-
-</div>
 </div>
 
-<div class="modal" id="modal" onclick="this.classList.remove('show')">
-  <img id="modalImg" src="">
+<!-- ============ LOGS TAB ============ -->
+<div class="tab-content" id="tab-logs">
+  <div class="card">
+    <div class="card-header">
+      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;vertical-align:middle"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Консоль</span>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-secondary" onclick="document.getElementById('logBox').scrollTop=document.getElementById('logBox').scrollHeight" style="padding:5px 12px;font-size:11px">↓ Вниз</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('logBox').innerHTML=''" style="padding:5px 12px;font-size:11px">✕ Очистить</button>
+      </div>
+    </div>
+    <div class="card-body" style="padding:10px">
+      <div class="log-box" id="logBox"></div>
+    </div>
+  </div>
 </div>
 
 <script>
-let pollTimer = null;
-
-function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
-
-function switchLeft(el){
-  document.querySelectorAll('.ltab').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.ltab-content').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('lc-'+el.dataset.t).classList.add('active');
-}
-function switchRight(el){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('tab-'+el.dataset.tab).classList.add('active');
-}
-
-function setLocked(v){
-  ['btnDownload','btnTrain','btnCheck','btnTune','btnAutopilot'].forEach(id=>{ const e=document.getElementById(id); if(e) e.disabled=v; });
-  const stopBtn=document.getElementById('btnStop');
-  if(stopBtn) stopBtn.style.display=v?'inline-block':'none';
-}
-
-function doDownload(){
-  apiPost('/api/download',{machine_type:document.getElementById('dl-machine').value});
-}
-function doStop(){
-  apiPost('/api/stop',{});
-function applyTrainBackendDefaults(){
-  const b=document.getElementById('tr-backend').value;
-  if(b==='mimii_baseline'){
-    document.getElementById('tr-epochs').value=50;
-    document.getElementById('tr-batch').value=512;
-    document.getElementById('tr-lr').value=0.001;
-    document.getElementById('tr-patience').value=8;
-  }else{
-    document.getElementById('tr-epochs').value=90;
-    document.getElementById('tr-batch').value=96;
-    document.getElementById('tr-lr').value=0.0003;
-    document.getElementById('tr-patience').value=12;
-  }
-}
-function doTrain(){
-  apiPost('/api/train',{
-    machine_type:document.getElementById('tr-machine').value,
-    machine_id:document.getElementById('tr-machine-id').value || null,
-    snr:parseInt(document.getElementById('tr-snr').value),
-    train_mode: document.getElementById('tr-mode').value,
-    model_backend:document.getElementById('tr-backend').value,
-    train_mode: document.getElementById('tr-mode').value,
-    base_model_id: '',
-    epochs: parseInt(document.getElementById('tr-epochs').value),
-    batch_size: parseInt(document.getElementById('tr-batch').value),
-    learning_rate: parseFloat(document.getElementById('tr-lr').value),
-    patience: parseInt(document.getElementById('tr-patience').value),
-    anomaly_quantile: parseFloat(document.getElementById('tr-quantile').value),
-    threshold_method: document.getElementById('tr-th-method').value,
-    threshold_target_fpr: parseFloat(document.getElementById('tr-target-fpr').value),
-    threshold_mad_k: parseFloat(document.getElementById('tr-mad-k').value)
+// ── Tab switching ──
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('tab-' + t.dataset.tab).classList.add('active');
   });
+});
+
+// ── Config ──
+async function loadConfig() {
+  try {
+    const cfg = await api('/api/config');
+    document.getElementById('cfg_model_type').value = cfg.fit.model_type || 'ae';
+    document.getElementById('cfg_epochs').value = cfg.fit.epochs || 200;
+    document.getElementById('cfg_lr').value = cfg.fit.learning_rate || 0.001;
+    document.getElementById('cfg_bottleneck').value = cfg.fit.bottleneck_size || 3;
+    document.getElementById('cfg_beta').value = cfg.fit.beta || 0.1;
+    document.getElementById('cfg_denoising').value = cfg.fit.denoising_std || 0.1;
+    document.getElementById('cfg_score_mode').value = cfg.fit.score_mode || 'max';
+  } catch(e) { /* ignore */ }
 }
-function doTune(){
-  apiPost('/api/tune',{
-    machine_type:document.getElementById('tr-machine').value,
-    machine_id:document.getElementById('tr-machine-id').value || null,
-    snr:parseInt(document.getElementById('tr-snr').value),
-    trials:parseInt(document.getElementById('tu-trials').value),
-    trial_epochs:parseInt(document.getElementById('tu-epochs').value),
-    trial_patience:parseInt(document.getElementById('tu-patience').value),
-    batch_size:parseInt(document.getElementById('tr-batch').value),
-    threshold_method:document.getElementById('tr-th-method').value,
-    threshold_target_fpr:parseFloat(document.getElementById('tr-target-fpr').value),
-    threshold_mad_k:parseFloat(document.getElementById('tr-mad-k').value),
-    anomaly_quantile:parseFloat(document.getElementById('tr-quantile').value)
-  });
-}
-function doAutopilot(){
-  apiPost('/api/autopilot',{
-    machine_type:document.getElementById('tr-machine').value,
-    machine_id:document.getElementById('tr-machine-id').value || null,
-    snr:parseInt(document.getElementById('tr-snr').value),
-    target_auc:parseFloat(document.getElementById('ap-target-auc').value),
-    max_rounds:parseInt(document.getElementById('ap-max-rounds').value),
-    trials_per_round:parseInt(document.getElementById('ap-trials-round').value),
-    trial_epochs:parseInt(document.getElementById('tu-epochs').value),
-    full_epochs:parseInt(document.getElementById('tr-epochs').value)
-  });
-}
-function doCheck(){
-  const files=document.getElementById('te-files').files;
-  if(!files||!files.length){alert('Выберите WAV-файлы');return;}
-  const fd=new FormData();
-  for(const f of files) fd.append('files',f);
-  fd.append('machine_type',document.getElementById('te-machine').value);
-  const machineId = document.getElementById('te-machine-id').value;
-  if(machineId) fd.append('machine_id', machineId);
-  fd.append('snr', parseInt(document.getElementById('te-snr').value));
-  const modelId = document.getElementById('te-model').value;
-  if(modelId) fd.append('model_id', modelId);
-  const thr=document.getElementById('te-thr').value;
-  if(thr) fd.append('threshold',thr);
-  fetch('/api/check_upload',{method:'POST',body:fd})
-    .then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.error||'Error');startPolling();})
-    .catch(e=>alert(e.message));
+async function saveConfig() {
+  try {
+    const body = {fit: {
+      model_type: document.getElementById('cfg_model_type').value,
+      epochs: parseInt(document.getElementById('cfg_epochs').value),
+      learning_rate: parseFloat(document.getElementById('cfg_lr').value),
+      bottleneck_size: parseInt(document.getElementById('cfg_bottleneck').value),
+      beta: parseFloat(document.getElementById('cfg_beta').value),
+      denoising_std: parseFloat(document.getElementById('cfg_denoising').value),
+      score_mode: document.getElementById('cfg_score_mode').value,
+    }};
+    await api('/api/config', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const toast = document.createElement('div');
+    toast.textContent = '✓ Конфиг сохранён';
+    toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--green);color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:999;box-shadow:0 4px 20px rgba(0,0,0,0.3);animation:fadeIn .2s ease';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2000);
+  } catch(e) { alert('Ошибка: ' + e.message); }
 }
 
-function apiPost(url,body){
-  fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.error||'Error');startPolling();})
-    .catch(e=>alert(e.message));
+// ── State ──
+let datasets = [];
+let statusInterval = null;
+
+function startPolling() {
+  if (statusInterval) return;
+  statusInterval = setInterval(pollStatus, 1000);
+}
+function stopPolling() {
+  if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
+}
+startPolling();
+
+async function api(url, opts = {}) {
+  const r = await fetch(url, opts);
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || r.statusText); }
+  return r.json();
 }
 
-function startPolling(){
-  if(pollTimer) clearInterval(pollTimer);
-  pollTimer=setInterval(pollState,1000);
+async function pollStatus() {
+  try { updateStatus(await api('/api/status')); } catch(e) { /* ignore */ }
 }
 
-function pollState(){
-  fetch('/api/state').then(r=>r.json()).then(s=>{
-    document.getElementById('sDot').className='status-dot '+(s.status==='running'?'running':'idle');
-    document.getElementById('sTxt').textContent=s.status==='running'?'Работает…':'Готов';
-    document.getElementById('pFill').style.width=s.progress+'%';
-    document.getElementById('pText').textContent=s.progress>0?s.progress+'%':'—';
-    setLocked(s.status==='running');
-
-    const db=document.getElementById('devBadge');
-    db.textContent=(s.device||'cpu').toUpperCase();
-    db.className='device-badge '+(s.device||'cpu');
-
-    if(s.startup_log&&s.startup_log.length)
-      document.getElementById('startupLog').innerHTML=s.startup_log.map(l=>
-        l.startsWith('WARNING')?`<span class="warn">${esc(l)}</span>`:`<span class="ok">${esc(l)}</span>`
-      ).join('\n');
-
-    const rl=document.getElementById('runLog');
-    rl.innerHTML=s.log.map(l=>
-      l.startsWith('ERROR')?`<span class="err">${esc(l)}</span>`:
-      l.startsWith('Done')||l.includes('complete')?`<span class="ok">${esc(l)}</span>`:esc(l)
-    ).join('\n')||'Ожидание…';
-    rl.scrollTop=rl.scrollHeight;
-
-    const ml=document.getElementById('modelsList');
-    ml.innerHTML=s.available_models&&s.available_models.length
-      ?s.available_models.map(m=>`<div class="model-tag">${esc(m)}</div>`).join('')
-      :'<span style="color:var(--text2);font-size:13px">нет</span>';
-
-    refreshModelSelectors(s);
-    applyTrainConfigFromState(s);
-
-    if(s.results&&s.results.train) renderTrain(s.results.train);
-    if(s.results&&s.results.tune) renderTune(s.results.tune);
-    if(s.results&&s.results.autopilot) renderAutopilot(s.results.autopilot);
-    if(s.results&&s.results.upload_check) renderCheck(s.results.upload_check);
-
-    if((s.progress>=90&&s.status==='running')||s.status==='idle') loadImages();
-
-    if(s.status==='idle'&&pollTimer){
-      setTimeout(()=>{clearInterval(pollTimer);pollTimer=null;},3000);
-    }
-  }).catch(e=>{
-    document.getElementById('runLog').innerHTML+='\n<span class="err">Poll error: '+(e.message||'connection lost')+'</span>';
-  });
-}
-
-function applyTrainConfigFromState(s){
-  if(!s || !s.train_config) return;
-  const c = s.train_config;
-  const setVal = (id, v)=>{ const e=document.getElementById(id); if(e && (e.value==='' || document.activeElement!==e)) e.value = v; };
-  setVal('tr-epochs', c.epochs);
-  setVal('tr-batch', c.batch_size);
-  setVal('tr-lr', c.learning_rate);
-  setVal('tr-patience', c.patience);
-  setVal('tr-quantile', c.anomaly_quantile);
-  setVal('tr-th-method', c.threshold_method || 'mad');
-  setVal('tr-target-fpr', c.threshold_target_fpr ?? 0.05);
-  setVal('tr-mad-k', c.threshold_mad_k ?? 2.2);
-  if (s.tune_config){
-    setVal('tu-trials', s.tune_config.trials ?? 12);
-    setVal('tu-epochs', s.tune_config.trial_epochs ?? 20);
-    setVal('tu-patience', s.tune_config.trial_patience ?? 5);
-  }
-}
-
-function refreshModelSelectors(statePayload){
-  const s = statePayload || window.__lastState || {};
-  window.__lastState = s;
-  const machineTrain = document.getElementById('tr-machine').value;
-  const machineTest = document.getElementById('te-machine').value;
-  const trainMid = document.getElementById('tr-machine-id').value || null;
-  const testMid = document.getElementById('te-machine-id').value || null;
-  const reg = s.model_registry || {};
-  const trainSnr = parseInt(document.getElementById('tr-snr').value || '6');
-  const testSnr = parseInt((document.getElementById('te-snr')?.value || '') || '6');
-  const teSel = document.getElementById('te-model');
-  const teItems = (reg[machineTest] || []).filter(m => (testMid ? m.machine_id===testMid : true) && (testSnr ? parseInt(m.snr)===testSnr : true));
-  teSel.innerHTML = '<option value="">latest (актуальная)</option>' + teItems.map(
-    m=>`<option value="${esc(m.id)}">${esc(m.id)}${m.machine_id?(' / '+esc(m.machine_id)):''} | AUC=${esc(m.auc_roc)} | ${esc(m.created_at)}</option>`
-  ).join('');
-}
-
-function metCls(v){return v>=0.85?'good':v>=0.7?'warn':'bad';}
-
-function renderTrain(r){
-  document.getElementById('metricsContent').innerHTML=`
-    <p style="color:var(--text2);font-size:13px;margin-bottom:4px">${esc(r.machine_type)}${r.machine_id?('/'+esc(r.machine_id)):''} @ ${esc(r.snr)}dB | ${esc(r.train_clips)} обучающих клипов</p>
-    <div class="metric-row">
-      <div class="metric-card ${metCls(r.auc_roc)}"><div class="lbl">AUC-ROC</div><div class="val">${r.auc_roc}</div></div>
-      <div class="metric-card ${metCls(r.pauc)}"><div class="lbl">pAUC</div><div class="val">${r.pauc}</div></div>
-      <div class="metric-card ${metCls(r.f1)}"><div class="lbl">F1</div><div class="val">${r.f1}</div></div>
-      <div class="metric-card"><div class="lbl">Threshold</div><div class="val" style="font-size:16px">${r.threshold}</div></div>
-    </div>
-    <p style="color:var(--text2);font-size:12px;margin-top:10px">
-      normal_err=${esc(r.normal_error_mean)} | abnormal_err=${esc(r.abnormal_error_mean)} | delta=${esc(r.error_delta)}
-    </p>`;
-
-  if(r.snr_robustness&&Object.keys(r.snr_robustness).length){
-    let rows=Object.entries(r.snr_robustness).sort((a,b)=>+a[0]-+b[0]).map(([snr,v])=>`
-      <tr><td>${snr} dB</td>
-      <td class="${metCls(v.auc_roc)?'clr-good':'clr-bad'}" style="color:${v.auc_roc>=0.85?'var(--green)':v.auc_roc>=0.7?'var(--orange)':'var(--red)'}">${v.auc_roc}</td>
-      <td>${v.pauc}</td></tr>`).join('');
-    document.getElementById('snrContent').innerHTML=`
-      <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">Устойчивость к шуму</h3>
-      <table class="snr-table"><tr><th>SNR</th><th>AUC-ROC</th><th>pAUC</th></tr>${rows}</table>`;
+function updateStatus(s) {
+  const badge = document.getElementById('statusBadge');
+  const text = document.getElementById('statusText');
+  const current = document.getElementById('currentTarget');
+  if (s.training) {
+    badge.className = 'status-badge running';
+    text.textContent = 'Training';
+    current.textContent = s.current ? '⚙ ' + s.current : '';
+    document.getElementById('btnTrainAll').disabled = true;
+    document.getElementById('btnTrainSelected').disabled = true;
+    document.getElementById('btnStop').disabled = false;
+  } else {
+    badge.className = 'status-badge idle';
+    text.textContent = 'Idle';
+    current.textContent = '';
+    document.getElementById('btnTrainAll').disabled = false;
+    document.getElementById('btnTrainSelected').disabled = false;
+    document.getElementById('btnStop').disabled = true;
   }
 
-  if(r.report){
-    document.getElementById('reportContent').innerHTML=`
-      <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">Classification Report</h3>
-      <div class="report-block">${esc(r.report)}</div>`;
-  }
-}
-
-function renderTune(r){
-  const p = r.best_params || {};
-  document.getElementById('metricsContent').innerHTML=`
-    <p style="color:var(--text2);font-size:13px;margin-bottom:4px">
-      AutoTune ${esc(r.machine_type)}${r.machine_id?('/'+esc(r.machine_id)):''} @ ${esc(r.snr)}dB | trials=${esc(r.trials)}
-    </p>
-    <div class="metric-row">
-      <div class="metric-card ${metCls(r.best_auc)}"><div class="lbl">Best Tune AUC</div><div class="val">${esc(r.best_auc)}</div></div>
-      <div class="metric-card"><div class="lbl">Best Delta</div><div class="val" style="font-size:16px">${esc(r.best_error_delta)}</div></div>
-      <div class="metric-card"><div class="lbl">Threshold</div><div class="val" style="font-size:16px">${esc(r.best_threshold)}</div></div>
-      <div class="metric-card"><div class="lbl">Predicted Anomaly Rate</div><div class="val" style="font-size:16px">${esc(r.best_pred_rate)}</div></div>
-    </div>
-    <div class="report-block" style="margin-top:10px">best_params:
-latent_dim=${esc(p.latent_dim)}
-base_channels=${esc(p.base_channels)}
-learning_rate=${esc(p.learning_rate)}
-threshold_method=${esc(p.threshold_method)}
-threshold_mad_k=${esc(p.threshold_mad_k)}
-anomaly_quantile=${esc(p.anomaly_quantile)}</div>`;
-}
-
-function renderAutopilot(r){
-  const p = r.best_params || {};
-  const rounds = (r.round_results || []).map(it=>`R${it.round}: AUC=${it.auc_roc} pAUC=${it.pauc} delta=${it.error_delta}`).join('\n');
-  document.getElementById('metricsContent').innerHTML=`
-    <p style="color:var(--text2);font-size:13px;margin-bottom:4px">
-      AutoPilot ${esc(r.machine_type)}${r.machine_id?('/'+esc(r.machine_id)):''} @ ${esc(r.snr)}dB | target AUC=${esc(r.target_auc)}
-    </p>
-    <div class="metric-row">
-      <div class="metric-card ${metCls(r.best_auc)}"><div class="lbl">Best AUC</div><div class="val">${esc(r.best_auc)}</div></div>
-      <div class="metric-card"><div class="lbl">Rounds</div><div class="val">${esc(r.rounds_ran)}</div></div>
-      <div class="metric-card"><div class="lbl">Best Round</div><div class="val">${esc(r.best_round)}</div></div>
-      <div class="metric-card"><div class="lbl">Status</div><div class="val" style="font-size:16px">${esc(r.status)}</div></div>
-    </div>
-    <div class="report-block" style="margin-top:10px">best_params:
-latent_dim=${esc(p.latent_dim)}
-base_channels=${esc(p.base_channels)}
-learning_rate=${esc(p.learning_rate)}
-threshold_method=${esc(p.threshold_method)}
-threshold_mad_k=${esc(p.threshold_mad_k)}
-anomaly_quantile=${esc(p.anomaly_quantile)}
-
-rounds:
-${esc(rounds)}</div>`;
-}
-
-function renderCheck(r){
-  let rows=r.items.map(it=>`<tr>
-    <td>${esc(it.name)}</td>
-    <td>${esc(it.score)}</td>
-    <td class="${it.is_anomaly?'clr-bad':'clr-good'}">${it.is_anomaly?'ANOMALY':'NORMAL'}</td>
-  </tr>`).join('');
-  document.getElementById('checkContent').innerHTML=`
-    <p style="color:var(--text2);font-size:13px;margin-bottom:8px">${esc(r.machine_type)} | порог=${esc(r.threshold)} | аномалий <b>${esc(r.anomaly_count)}/${esc(r.total_files)}</b></p>
-    <table class="res-table"><thead><tr><th style="text-align:left">Файл</th><th>Score</th><th>Вердикт</th></tr></thead><tbody>${rows}</tbody></table>`;
-  // auto-switch to check tab
-  document.querySelectorAll('.tab').forEach(t=>{
-    t.classList.toggle('active', t.dataset.tab==='check');
+  const logBox = document.getElementById('logBox');
+  const wasAtBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 50;
+  s.logs.forEach(msg => {
+    const d = document.createElement('div');
+    d.className = 'log-line';
+    d.textContent = msg;
+    logBox.appendChild(d);
   });
-  document.querySelectorAll('.tab-content').forEach(t=>{
-    t.classList.toggle('active', t.id==='tab-check');
-  });
-}
+  if (wasAtBottom) logBox.scrollTop = logBox.scrollHeight;
 
-const IMG_NAMES={'scores':'Score Distribution','roc':'ROC Curve','cm':'Confusion Matrix','snr':'SNR Comparison'};
-function loadImages(){
-  fetch('/api/images').then(r=>r.json()).then(imgs=>{
-    if(!imgs.length) return;
-    let html='<div class="imgs-grid">';
-    imgs.forEach(name=>{
-      const key=Object.keys(IMG_NAMES).find(k=>name.includes(k));
-      const cap=key?IMG_NAMES[key]:name;
-      html+=`<div class="img-card" onclick="showModal('/results/${name}')">
-        <img src="/results/${name}?t=${Date.now()}" loading="lazy">
-        <div class="cap">${esc(cap)}</div></div>`;
+  if (s.progress.length) {
+    let html = '<table><tr><th>Датасет</th><th>Статус</th><th>AUC</th></tr>';
+    s.progress.forEach(p => {
+      const cls = p.status === 'done' ? 'status-done' : p.status === 'error' ? 'status-error' : 'status-processing';
+      const label = p.status === 'done' ? '✓ Готово' : p.status === 'error' ? '✗ Ошибка' : '⋯ В процессе';
+      const auc = p.auc !== null ? `<span class="auc-value">${p.auc.toFixed(6)}</span>` : '—';
+      html += `<tr><td style="font-weight:500">${p.key}</td><td><span class="${cls}" style="font-weight:600">${label}</span></td><td style="font-variant-numeric:tabular-nums">${auc}</td></tr>`;
     });
-    html+='</div>';
-    document.getElementById('chartsContent').innerHTML=html;
+    html += '</table>';
+    document.getElementById('trainingProgress').innerHTML = html;
+  }
+
+  if (Object.keys(s.results).length) renderResults(s.results);
+}
+
+// ── Datasets ──
+async function refreshDatasets() {
+  try {
+    datasets = await api('/api/datasets');
+    if (!datasets.length) {
+      document.getElementById('datasetTable').innerHTML = '<div class="empty-state"><div class="icon">📂</div><p>Датасеты не найдены. Поместите данные в dataset/</p></div>';
+      return;
+    }
+    let html = `<div style="padding:10px 16px;font-size:12px;color:var(--text-dim);border-bottom:1px solid var(--card-border)">Найдено: <strong style="color:var(--text)">${datasets.length}</strong></div>
+      <table>
+        <tr><th style="width:36px"><input type="checkbox" id="selectAllDs" onchange="toggleAllDatasets()"></th><th>Machine</th><th>ID</th><th>SNR</th><th>Ключ</th></tr>`;
+    datasets.forEach(d => {
+      html += `<tr>
+        <td><input type="checkbox" class="ds-cb" value="${d.key}" id="cb_${d.key}"></td>
+        <td><span style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);opacity:.4"></span>${d.machine_type}</span></td>
+        <td style="font-weight:500">${d.machine_id}</td>
+        <td><span style="background:var(--accent-glow);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">${d.db}</span></td>
+        <td style="color:var(--text-dim);font-size:11px">${d.key}</td>
+      </tr>`;
+    });
+    html += '</table>';
+    document.getElementById('datasetTable').innerHTML = html;
+  } catch(e) {
+    document.getElementById('datasetTable').innerHTML = `<div class="empty-state"><p style="color:var(--red)">Ошибка: ${e.message}</p></div>`;
+  }
+}
+
+function toggleAllDatasets() {
+  const checked = document.getElementById('selectAllDs').checked;
+  document.querySelectorAll('.ds-cb').forEach(cb => cb.checked = checked);
+}
+
+async function startTrain(targets) {
+  try {
+    await api('/api/train', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({targets: targets})});
+  } catch(e) { alert('Ошибка: ' + e.message); }
+}
+
+function startTrainSelected() {
+  const selected = Array.from(document.querySelectorAll('.ds-cb:checked')).map(cb => cb.value);
+  if (!selected.length) { alert('Выберите датасеты'); return; }
+  startTrain(selected);
+}
+
+async function stopTrain() {
+  try { await api('/api/stop', {method: 'POST'}); } catch(e) { /* ignore */ }
+}
+
+// ── Results ──
+async function refreshResults() {
+  try { renderResults(await api('/api/results')); } catch(e) { /* ignore */ }
+}
+
+function renderResults(results) {
+  const keys = Object.keys(results);
+  if (!keys.length) {
+    document.getElementById('resultsContainer').innerHTML = '<div class="empty-state"><div class="icon">📊</div><p>Нет результатов</p></div>';
+    return;
+  }
+  const aucs = keys.map(k => results[k].AUC);
+  const avg = aucs.reduce((a, b) => a + b, 0) / aucs.length;
+  let html = `<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <div class="result-badge"><span class="label">Датасетов</span><span class="value">${keys.length}</span></div>
+    <div class="result-badge"><span class="label">Средний AUC</span><span class="value">${avg.toFixed(4)}</span></div>
+    <div class="result-badge"><span class="label">Мин</span><span class="value">${Math.min(...aucs).toFixed(4)}</span></div>
+    <div class="result-badge"><span class="label">Макс</span><span class="value">${Math.max(...aucs).toFixed(4)}</span></div>
+  </div>`;
+
+  html += '<table><tr><th>Датасет</th><th>AUC</th><th>EER</th><th>F1</th><th>Порог</th><th style="width:20px"></th></tr>';
+  keys.sort().forEach(k => {
+    const r = results[k];
+    const v = r.AUC;
+    const color = v >= 0.8 ? 'var(--green)' : v >= 0.6 ? 'var(--yellow)' : 'var(--red)';
+    const ee = r.EER !== undefined ? r.EER.toFixed(4) : '—';
+    const f1 = r.best_F1 !== undefined ? r.best_F1.toFixed(4) : '—';
+    const th = r.best_threshold !== undefined ? r.best_threshold.toFixed(4) : '—';
+    const detailId = 'det_' + k.replace(/[^a-zA-Z0-9]/g, '_');
+    html += `<tr style="cursor:pointer" onclick="toggleDetail('${detailId}')">
+      <td style="font-weight:500">${k}</td>
+      <td style="color:${color};font-weight:700;font-variant-numeric:tabular-nums">${v.toFixed(6)}</td>
+      <td style="font-variant-numeric:tabular-nums">${ee}</td>
+      <td style="font-variant-numeric:tabular-nums">${f1}</td>
+      <td style="font-variant-numeric:tabular-nums;color:var(--text-dim)">${th}</td>
+      <td style="color:var(--text-dim);font-size:16px;transition:transform .2s" class="arrow">▸</td>
+    </tr>`;
+    html += `<tr id="${detailId}" style="display:none" class="detail-row"><td colspan="6" style="padding:0">`;
+    html += buildDetail(r);
+    html += `</td></tr>`;
   });
+  html += '</table>';
+  document.getElementById('resultsContainer').innerHTML = html;
 }
 
-function showModal(src){
-  document.getElementById('modalImg').src=src;
-  document.getElementById('modal').classList.add('show');
-}
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.getElementById('modal').classList.remove('show'); });
+function buildDetail(r) {
+  let h = '<div class="detail-panel">';
 
-pollState();
-document.getElementById('tr-machine').addEventListener('change', ()=>refreshModelSelectors());
-document.getElementById('te-machine').addEventListener('change', ()=>refreshModelSelectors());
-document.getElementById('tr-machine-id').addEventListener('change', ()=>refreshModelSelectors());
-document.getElementById('te-machine-id').addEventListener('change', ()=>refreshModelSelectors());
-document.getElementById('tr-snr').addEventListener('change', ()=>refreshModelSelectors());
+  if (r.config) {
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;font-size:11px;color:var(--text-dim)">';
+    for (const [k, v] of Object.entries(r.config)) {
+      h += `<span style="background:var(--bg2);padding:3px 10px;border-radius:4px;border:1px solid var(--card-border)"><strong>${k}:</strong> ${v}</span>`;
+    }
+    h += '</div>';
+  }
+
+  if (r.normal_scores) {
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">';
+    h += '<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;border:1px solid rgba(34,197,94,0.15)"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--green);margin-bottom:6px">Normal</div>' + scoreTable(r.normal_scores) + '</div>';
+    h += '<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;border:1px solid rgba(239,68,68,0.15)"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--red);margin-bottom:6px">Anomal</div>' + scoreTable(r.anomal_scores) + '</div>';
+    h += '</div>';
+  }
+
+  if (r.frame_mean_avg !== undefined) {
+    h += `<div style="display:flex;gap:12px;font-size:11px;color:var(--text-dim);margin-bottom:10px;flex-wrap:wrap">
+      <span style="background:var(--bg2);padding:4px 10px;border-radius:4px">Frame mean: ${r.frame_mean_avg.toFixed(4)}±${r.frame_mean_std.toFixed(4)}</span>
+      <span style="background:var(--bg2);padding:4px 10px;border-radius:4px">Frame max: ${r.frame_max_avg.toFixed(4)}±${r.frame_max_std.toFixed(4)}</span>
+    </div>`;
+  }
+
+  if (r.histogram) h += histogramHTML(r.histogram);
+
+  h += '</div>';
+  return h;
+}
+
+function scoreTable(s) {
+  const rows = [['Count',s.count],['Mean',s.mean.toFixed(4)],['Std',s.std.toFixed(4)],['Median',s.median.toFixed(4)],['Min',s.min.toFixed(4)],['Max',s.max.toFixed(4)],['p5',s.p5.toFixed(4)],['p95',s.p95.toFixed(4)]];
+  let t = '<table style="font-size:11px">';
+  rows.forEach(([k,v]) => {
+    t += `<tr><td style="color:var(--text-dim);padding:2px 6px;border:none;font-size:11px">${k}</td><td style="padding:2px 6px;border:none;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${v}</td></tr>`;
+  });
+  t += '</table>';
+  return t;
+}
+
+function histogramHTML(h) {
+  const edges = h.bin_edges, norm = h.normal, anom = h.anomal;
+  const maxVal = Math.max(...norm, ...anom, 1);
+  let html = '<div style="margin-top:6px">';
+  html += '<div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text-dim);margin-bottom:6px">';
+  html += '<span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--green);opacity:.7"></span> Normal</span>';
+  html += '<span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--red);opacity:.7"></span> Anomal</span>';
+  html += '</div><div class="hist-container">';
+  for (let i = 0; i < norm.length; i++) {
+    const nH = Math.max((norm[i] / maxVal) * 70, 1);
+    const aH = Math.max((anom[i] / maxVal) * 70, 1);
+    html += `<div class="hist-bar-group">`;
+    if (anom[i] > 0) html += `<div class="hist-bar-a" style="height:${aH}px"></div>`;
+    if (norm[i] > 0) html += `<div class="hist-bar-n" style="height:${nH}px"></div>`;
+    html += `<div class="hist-label">${edges[i].toFixed(1)}</div></div>`;
+  }
+  html += '</div></div>';
+  return html;
+}
+
+function toggleDetail(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const isHidden = el.style.display === 'none' || el.style.display === '';
+  el.style.display = isHidden ? 'table-row' : 'none';
+  const arrow = el.previousElementSibling?.querySelector('.arrow');
+  if (arrow) arrow.style.transform = isHidden ? 'rotate(90deg)' : '';
+}
+
+// ── Test Model ──
+async function refreshTestModels() {
+  try {
+    const models = await api('/api/models');
+    document.querySelectorAll('#testModelSelect,#testModelSelect2').forEach(s => {
+      s.innerHTML = '<option value="">Выберите модель...</option>';
+      models.forEach(m => { s.innerHTML += `<option value="${m.key}">${m.key} (${m.mtime})</option>`; });
+    });
+    await refreshEvalFiles();
+  } catch(e) { /* ignore */ }
+}
+
+async function refreshEvalFiles() {
+  try {
+    const results = await api('/api/results');
+    const sel = document.getElementById('testEvalFile');
+    sel.innerHTML = '<option value="">Выберите файл...</option>';
+  } catch(e) { /* ignore */ }
+}
+
+async function predictFile() {
+  const file = document.getElementById('testFileInput').files[0];
+  if (!file) { alert('Выберите аудиофайл'); return; }
+  const modelKey = document.getElementById('testModelSelect').value;
+  if (!modelKey) { alert('Выберите модель'); return; }
+  const form = new FormData();
+  form.append('file', file);
+  form.append('model_key', modelKey);
+  try {
+    const r = await api('/api/predict', {method: 'POST', body: form});
+    showPrediction('predictResult', 'scoreDisplay', r);
+  } catch(e) { alert('Ошибка: ' + e.message); }
+}
+
+async function predictEval() {
+  alert('Загрузите файл через вкладку "Загрузить аудиофайл"');
+}
+
+function showPrediction(containerId, scoreId, data) {
+  const c = document.getElementById(containerId);
+  const s = document.getElementById(scoreId);
+  c.classList.remove('hidden');
+  s.textContent = data.score_str;
+  s.className = 'big-score' + (data.score > 0.5 ? ' high' : '');
+}
+
+// ── Init ──
+loadConfig();
+refreshDatasets();
+refreshResults();
+refreshTestModels();
 </script>
 </body>
 </html>

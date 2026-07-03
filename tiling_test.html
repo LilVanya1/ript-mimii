@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MIMII — Tiling</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e6edf3;height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none}
+
+/* Top bar */
+.topbar{background:#161b22;border-bottom:1px solid #30363d;padding:0 16px;height:40px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.topbar-title{font-size:14px;font-weight:600;letter-spacing:-.01em}
+.topbar-title span{background:linear-gradient(135deg,#58a6ff,#bc8cff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.topbar-info{display:flex;align-items:center;gap:12px;font-size:12px;color:#8b949e}
+.topbar-dot{width:8px;height:8px;border-radius:50%;background:#3fb950;display:inline-block;margin-right:4px}
+.topbar-model{background:#21262d;padding:3px 10px;border-radius:4px;font-size:11px;color:#8b949e;border:1px solid #30363d}
+
+/* Container */
+.tiling-container{flex:1;display:flex;flex-direction:column;gap:8px;padding:8px}
+.row{display:flex;gap:8px;flex:1}
+.col{display:flex;flex-direction:column;gap:3px;flex:1}
+
+/* Tile */
+.tile{background:#161b22;border:1px solid #30363d;border-radius:10px;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.tile:hover{border-color:#484f58}
+.tile-header{background:#0d1117;border-bottom:1px solid #30363d;padding:4px 10px;font-size:11px;font-weight:600;color:#8b949e;display:flex;align-items:center;flex-shrink:0;text-transform:uppercase;letter-spacing:.05em}
+.tile-body{flex:1;overflow:auto;padding:8px;font-size:12px;position:relative}
+.tile-body::-webkit-scrollbar{width:4px;height:4px}
+.tile-body::-webkit-scrollbar-track{background:transparent}
+.tile-body::-webkit-scrollbar-thumb{background:#30363d;border-radius:2px}
+
+/* Resize handle */
+.handle{background:#21262d;flex-shrink:0;position:relative}
+.handle:hover{background:#30363d}
+.handle-h{height:3px;cursor:row-resize}
+.handle-v{width:3px;cursor:col-resize}
+.handle-h::after,.handle-v::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+.handle-h::after{width:20px;height:1px;background:#484f58}
+.handle-v::after{width:1px;height:20px;background:#484f58}
+
+/* Datasets table */
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{text-align:left;padding:5px 8px;font-size:10px;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid #21262d;background:#0d1117;position:sticky;top:0}
+td{padding:5px 8px;border-bottom:1px solid #21262d;color:#e6edf3}
+tr:hover td{background:rgba(255,255,255,0.02)}
+.tag{background:rgba(88,166,255,0.1);color:#58a6ff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600}
+
+/* Checkbox */
+input[type=checkbox]{accent-color:#58a6ff;width:14px;height:14px;cursor:pointer}
+
+/* Progress bar */
+.progress-bar{background:#21262d;height:4px;border-radius:2px;overflow:hidden;margin:4px 0}
+.progress-bar-fill{height:100%;background:linear-gradient(90deg,#58a6ff,#bc8cff);border-radius:2px;transition:width .3s}
+
+/* Metric boxes */
+.metrics{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.metric{background:#0d1117;border:1px solid #21262d;padding:5px 10px;border-radius:4px;text-align:center;flex:1;min-width:70px}
+.metric .val{font-size:16px;font-weight:700;color:#58a6ff;font-variant-numeric:tabular-nums;line-height:1.2}
+.metric .lbl{font-size:9px;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.metric.green .val{color:#3fb950}
+.metric.yellow .val{color:#d29922}
+.metric.red .val{color:#f85149}
+
+/* Logs */
+.log-area{background:#0d1117;border:1px solid #21262d;padding:6px 8px;height:100%;overflow-y:auto;font-family:'JetBrains Mono','Cascadia Code','Consolas',monospace;font-size:11px;line-height:1.6;color:#8b949e}
+.log-area .info{color:#8b949e}
+.log-area .ok{color:#3fb950}
+.log-area .warn{color:#d29922}
+.log-area .err{color:#f85149}
+
+/* Empty state */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#484f58;font-size:13px;gap:6px}
+.empty svg{opacity:.4}
+
+/* Badge / score */
+.score{font-size:24px;font-weight:800;color:#58a6ff;font-variant-numeric:tabular-nums}
+.score.high{color:#f85149}
+.score-label{font-size:10px;color:#8b949e;margin-top:2px}
+
+/* Config fields */
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.cfg-field{background:#0d1117;border:1px solid #21262d;padding:4px 8px;border-radius:3px}
+.cfg-field label{display:block;font-size:9px;color:#8b949e;text-transform:uppercase;letter-spacing:.06em}
+.cfg-field input,.cfg-field select{background:transparent;border:none;color:#e6edf3;font-size:11px;width:100%;padding:2px 0;outline:none}
+
+/* Buttons */
+.btn{background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 12px;font-size:11px;cursor:pointer;border-radius:4px;transition:all .15s}
+.btn:hover{background:#30363d;border-color:#484f58}
+.btn-primary{background:#238636;border-color:#238636;color:#fff}
+.btn-primary:hover{background:#2ea043}
+.btn-danger{background:#da3633;border-color:#da3633;color:#fff}
+.btn-danger:hover{background:#f85149}
+.btn:active{transform:scale(.97)}
+.btn-row{display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap}
+
+/* Histogram */
+.hist{display:flex;align-items:flex-end;height:50px;gap:1px;margin-top:4px}
+.hist-bar{flex:1;min-width:0;display:flex;flex-direction:column-reverse;align-items:center}
+.hist-fill-n{width:100%;background:#3fb950;opacity:.6;transition:height .2s}
+.hist-fill-a{width:100%;background:#f85149;opacity:.6;transition:height .2s}
+.hist-lbl{font-size:7px;color:#484f58;margin-top:1px}
+
+/* Result row detail */
+.detail{display:none;padding:6px;background:#0d1117;border:1px solid #21262d;margin:4px 0;font-size:11px}
+.detail.open{display:block}
+
+/* Stats table inside detail */
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat-col{border:1px solid #21262d;border-radius:3px;padding:6px 8px}
+.stat-col .title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.stat-col.green .title{color:#3fb950}
+.stat-col.red .title{color:#f85149}
+.stat-col table{font-size:10px}
+.stat-col table td{padding:1px 4px;border:none;font-size:10px}
+.stat-col table td:last-child{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-title"><span>mimii</span> — tiling</div>
+  <div class="topbar-info">
+    <span><span class="topbar-dot"></span>idle</span>
+    <span class="topbar-model">VAE · β=0.1 · bs=3</span>
+    <span style="color:#484f58">·</span>
+    <span>0_dB_fan</span>
+  </div>
+</div>
+
+<div class="tiling-container">
+  <!-- Row 1 -->
+  <div class="row" style="flex:3">
+    <!-- Datasets -->
+    <div class="tile" style="flex:2">
+      <div class="tile-header">
+        <span>📂 datasets</span>
+      </div>
+      <div class="tile-body" id="datasetsBody">
+        <table>
+          <tr><th style="width:28px"><input type="checkbox" checked></th><th>machine</th><th>id</th><th>snr</th></tr>
+          <tr><td><input type="checkbox" checked></td><td>fan</td><td>id_00</td><td><span class="tag">0_dB</span></td></tr>
+          <tr><td><input type="checkbox" checked></td><td>fan</td><td>id_02</td><td><span class="tag">0_dB</span></td></tr>
+          <tr><td><input type="checkbox" checked></td><td>fan</td><td>id_04</td><td><span class="tag">0_dB</span></td></tr>
+          <tr><td><input type="checkbox" checked></td><td>fan</td><td>id_06</td><td><span class="tag">0_dB</span></td></tr>
+          <tr><td><input type="checkbox"></td><td>fan</td><td>id_00</td><td><span class="tag">-6_dB</span></td></tr>
+          <tr><td><input type="checkbox"></td><td>fan</td><td>id_02</td><td><span class="tag">-6_dB</span></td></tr>
+          <tr><td><input type="checkbox"></td><td>fan</td><td>id_04</td><td><span class="tag">-6_dB</span></td></tr>
+          <tr><td><input type="checkbox"></td><td>fan</td><td>id_06</td><td><span class="tag">-6_dB</span></td></tr>
+        </table>
+      </div>
+    </div>
+    <!-- Logs -->
+    <div class="tile" style="flex:1">
+      <div class="tile-header">
+        <span>⌨ logs</span>
+      </div>
+      <div class="tile-body" style="padding:6px">
+        <div class="log-area" id="logArea">
+          <div class="info">[12:27:31] [fan_id_00_0_dB] Created: 186636 train samples</div>
+          <div class="info">[12:27:33] [fan_id_00_0_dB] Training (200 epochs, model=vae)...</div>
+          <div class="ok">[12:27:33] [fan_id_00_0_dB]    Epoch     loss   val_loss     grad_norm</div>
+          <div class="info">[12:27:33] [fan_id_00_0_dB]     1/200  128.5500  16.6141  258.2290</div>
+          <div class="info">[12:31:02] [fan_id_00_0_dB]    21/200   10.9254  10.1060    0.4898</div>
+          <div class="info">[12:34:31] [fan_id_00_0_dB]    41/200    8.7961   9.2401    0.1719</div>
+          <div class="warn">[12:38:05] [fan_id_00_0_dB]    61/200    8.2122   8.8359    0.1500</div>
+          <div class="info">[12:41:38] [fan_id_00_0_dB]    81/200    7.8897   8.6679    0.1295</div>
+          <div class="ok">[12:45:10] [fan_id_00_0_dB]   101/200    7.7162   8.6044    0.0335</div>
+          <div class="info">[12:48:44] [fan_id_00_0_dB]   121/200    7.5832   8.5738    0.1339</div>
+          <div class="info">[12:52:17] [fan_id_00_0_dB]   141/200    7.4964   8.5554    0.1028</div>
+          <div class="info">[12:55:51] [fan_id_00_0_dB]   161/200    7.4451   8.5423    0.0488</div>
+          <div class="ok">[12:59:25] [fan_id_00_0_dB]   181/200    7.4160   8.5323    0.0917</div>
+          <div class="ok">[13:02:56] [fan_id_00_0_dB]   200/200    7.3840   8.5263    0.0869</div>
+          <div class="ok">[13:02:56] [fan_id_00_0_dB] Evaluating 814 files...</div>
+          <div class="ok">[13:24:18] [fan_id_00_0_dB] AUC = 0.609125</div>
+          <div class="info">[13:24:18] [fan_id_02_0_dB] Loading dataset...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Handle -->
+  <div class="handle handle-h"></div>
+
+  <!-- Row 2 -->
+  <div class="row" style="flex:2">
+    <!-- Training -->
+    <div class="tile" style="flex:1">
+      <div class="tile-header">
+        <span>▶ training</span>
+      </div>
+      <div class="tile-body">
+        <div class="btn-row">
+          <button class="btn btn-primary">▶ Train all</button>
+          <button class="btn">▶ Selected</button>
+          <button class="btn btn-danger">⏹ Stop</button>
+        </div>
+        <div class="cfg-grid">
+          <div class="cfg-field"><label>model</label><select><option>vae</option><option>ae</option><option>cnn</option></select></div>
+          <div class="cfg-field"><label>epochs</label><input type="number" value="200"></div>
+          <div class="cfg-field"><label>lr</label><input type="number" step=".0001" value="0.001"></div>
+          <div class="cfg-field"><label>bottleneck</label><input type="number" value="3"></div>
+          <div class="cfg-field"><label>β (vae)</label><input type="number" step=".01" value="0.1"></div>
+          <div class="cfg-field"><label>denoising</label><input type="number" step=".01" value="0.1"></div>
+          <div class="cfg-field"><label>score</label><select><option>max</option><option>mean</option><option>p95</option></select></div>
+        </div>
+        <div class="progress-bar" style="margin-top:6px"><div class="progress-bar-fill" style="width:62%"></div></div>
+        <table style="margin-top:6px">
+          <tr><th>dataset</th><th>status</th><th>auc</th></tr>
+          <tr><td>fan_id_00_0_dB</td><td style="color:#3fb950">✓ done</td><td style="font-weight:700;color:#58a6ff">0.609125</td></tr>
+          <tr><td>fan_id_02_0_dB</td><td style="color:#d29922">⋯ 143/200</td><td>—</td></tr>
+          <tr><td>fan_id_04_0_dB</td><td style="color:#8b949e">⋯ pending</td><td>—</td></tr>
+          <tr><td>fan_id_06_0_dB</td><td style="color:#8b949e">⋯ pending</td><td>—</td></tr>
+        </table>
+      </div>
+    </div>
+    <!-- Results -->
+    <div class="tile" style="flex:1">
+      <div class="tile-header">
+        <span>📊 results</span>
+      </div>
+      <div class="tile-body">
+        <div class="metrics">
+          <div class="metric"><div class="val">1</div><div class="lbl">datasets</div></div>
+          <div class="metric green"><div class="val">0.6091</div><div class="lbl">avg auc</div></div>
+          <div class="metric yellow"><div class="val">0.6091</div><div class="lbl">min</div></div>
+          <div class="metric green"><div class="val">0.6091</div><div class="lbl">max</div></div>
+        </div>
+        <table>
+          <tr><th>dataset</th><th>auc</th><th>eer</th><th>f1</th><th></th></tr>
+          <tr onclick="toggleDetail(this)" style="cursor:pointer">
+            <td>fan_id_00_0_dB</td>
+            <td style="font-weight:700;color:#d29922">0.609125</td>
+            <td>0.3845</td>
+            <td>0.6138</td>
+            <td style="color:#484f58">▸</td>
+          </tr>
+          <tr class="detail-row" style="display:none"><td colspan="5" style="padding:0">
+            <div class="detail open">
+              <div class="stats-grid">
+                <div class="stat-col green">
+                  <div class="title">normal</div>
+                  <table><tr><td>mean</td><td>0.0092</td></tr><tr><td>std</td><td>0.0154</td></tr><tr><td>p95</td><td>0.0312</td></tr></table>
+                </div>
+                <div class="stat-col red">
+                  <div class="title">anomal</div>
+                  <table><tr><td>mean</td><td>0.0185</td></tr><tr><td>std</td><td>0.0462</td></tr><tr><td>p95</td><td>0.0723</td></tr></table>
+                </div>
+              </div>
+              <div class="hist">
+                <div class="hist-bar"><div class="hist-fill-n" style="height:40px"></div><div class="hist-lbl">0</div></div>
+                <div class="hist-bar"><div class="hist-fill-n" style="height:12px"></div><div class="hist-lbl">0.01</div></div>
+                <div class="hist-bar"><div class="hist-fill-n" style="height:4px"></div><div class="hist-lbl">0.02</div></div>
+                <div class="hist-bar"><div class="hist-fill-a" style="height:6px"></div><div class="hist-lbl">0.03</div></div>
+                <div class="hist-bar"><div class="hist-fill-a" style="height:12px"></div><div class="hist-lbl">0.04</div></div>
+                <div class="hist-bar"><div class="hist-fill-a" style="height:3px"></div><div class="hist-lbl">0.05</div></div>
+              </div>
+            </div>
+          </td></tr>
+        </table>
+      </div>
+    </div>
+    <!-- Testing -->
+    <div class="tile" style="flex:0.8">
+      <div class="tile-header">
+        <span>🎤 test</span>
+      </div>
+      <div class="tile-body" style="display:flex;flex-direction:column;gap:6px">
+        <select style="background:#0d1117;border:1px solid #21262d;color:#e6edf3;padding:4px 8px;font-size:11px;border-radius:3px;width:100%">
+          <option>fan_id_00_0_dB</option>
+          <option>fan_id_02_0_dB</option>
+        </select>
+        <input type="file" style="background:#0d1117;border:1px solid #21262d;color:#e6edf3;padding:4px;font-size:11px;border-radius:3px;width:100%">
+        <button class="btn btn-primary" style="width:100%">Analyze</button>
+        <div style="text-align:center;padding:10px;background:#0d1117;border:1px solid #21262d;border-radius:4px;flex:1;display:flex;flex-direction:column;justify-content:center">
+          <div class="score">0.0184</div>
+          <div class="score-label">anomaly score · normal</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleDetail(row) {
+  const detail = row.nextElementSibling;
+  if (!detail || !detail.classList.contains('detail-row')) return;
+  const isHidden = detail.style.display === 'none' || detail.style.display === '';
+  detail.style.display = isHidden ? 'table-row' : 'none';
+  const arrow = row.querySelector('td:last-child');
+  if (arrow) arrow.style.transform = isHidden ? 'rotate(90deg)' : '';
+}
+</script>
+</body>
+</html>

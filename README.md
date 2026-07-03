@@ -1,250 +1,111 @@
-# Acoustic Diagnostics Project
+# MIMII dataset baseline (Ver.1.0.3)
 
-Проект по акустической диагностике промышленного оборудования на основе звука.  
-Основная задача: по аудио определить, является ли работа машины нормальной или аномальной, и при необходимости сохранить/использовать отдельные модели для разных экземпляров оборудования.
+This sample code is a baseline of anomaly detection for MIMII dataset.
 
-## Кейс
+The MIMII Dataset is a sound dataset for malfunctioning industrial machine investigation and inspection. It contains the sounds generated from four types of industrial machines, i.e. valves, pumps, fans, and slide rails. Each type of machine includes multiple individual product models, and the data for each model contains normal and anomalous sounds. To resemble a real-life scenario, various anomalous sounds were recorded. Also, the background noise recorded in multiple real factories was mixed with the machine sounds. 
 
-Кейс соответствует задаче предиктивного обслуживания:
+The MIMII Dataset can be downloaded at: https://zenodo.org/record/3384388
 
-- вход: аудиоокно или `.wav` файл;
-- выход: оценка аномальности, порог и итоговый вердикт;
-- тип задачи: в первую очередь `anomaly detection` на нормальных данных.
+If you use the MIMII Dataset, please cite either of the following papers:
 
-Используемый датасет и ориентир по постановке:
+> [1] Harsh Purohit, Ryo Tanabe, Kenji Ichige, Takashi Endo, Yuki Nikaido, Kaori Suefusa, and Yohei Kawaguchi, “MIMII Dataset: Sound Dataset for Malfunctioning Industrial Machine Investigation and Inspection,” arXiv preprint arXiv:1909.09347, 2019. URL: https://arxiv.org/abs/1909.09347
 
-- MIMII Dataset
-- MIMII baseline
+> [2] Harsh Purohit, Ryo Tanabe, Kenji Ichige, Takashi Endo, Yuki Nikaido, Kaori Suefusa, and Yohei Kawaguchi, “MIMII Dataset: Sound Dataset for Malfunctioning Industrial Machine Investigation and Inspection,” in Proc. 4th Workshop on Detection and Classification of Acoustic Scenes and Events (DCASE), 2019.
 
-## Технологический стек
+## Usage
 
-- **Backend:** Python, Flask
-- **DL/ML:** PyTorch
-- **Audio processing:** librosa, soundfile
-- **Метрики:** scikit-learn
-- **Визуализация:** matplotlib, seaborn
-- **Frontend:** HTML/CSS/vanilla JS
-- **Локальный запуск:** Windows batch scripts
+### 1. unzip dataset
 
-## Что реализовано
+Please download .zip files from ZENODO (https://zenodo.org/record/3384388).  
+After downloading, .zip files locate under "./dataset" directory.
 
-### 1. Веб-интерфейс
-
-В `templates/index.html` реализованы:
-
-- запуск обучения;
-- выбор `machine_type`;
-- выбор `machine_id` (`id_00`, `id_02`, `id_04`, `id_06`);
-- выбор режима:
-  - `new`
-  - `finetune`
-- настройка параметров обучения прямо из UI:
-  - `epochs`
-  - `batch_size`
-  - `learning_rate`
-  - `patience`
-  - `anomaly_quantile`
-  - `threshold_method` (`kde_fpr` / `mad` / `quantile`)
-  - `threshold_target_fpr`
-  - `threshold_mad_k`
-- проверка пользовательских `.wav`;
-- просмотр метрик, графиков и логов;
-- выбор конкретной сохранённой модели.
-
-### 2. Подготовка данных
-
-В `src/dataset.py`:
-
-- загрузка `.wav`;
-- нарезка на окна;
-- вычисление mel-спектрограмм;
-- нормализация mel-спектрограмм в диапазон `[0, 1]`;
-- предварительный расчёт признаков для ускорения train loop;
-- честный split **по файлам**, а не по окнам, чтобы убрать leakage;
-- фильтрация по `machine_id`.
-
-### 3. Архитектура модели
-
-Текущая архитектура в `src/autoencoder.py`:
-
-- **depthwise-separable autoencoder**
-- блоки `depthwise conv + pointwise conv`
-- без `MLP` / `Linear` bottleneck слоёв
-- компактная сверточная модель
-- `Sigmoid()` на выходе
-- обучение по `L1Loss`
-- scheduler `ReduceLROnPlateau`
-
-Преимущество текущей версии:
-
-- меньше параметров;
-- ниже риск переобучения на монотонных аудиоданных;
-- лучше подходит под спектрограммы, чем тяжёлый fully-connected bottleneck.
-
-### 4. Логика обнаружения аномалий
-
-Подход:
-
-1. обучаем автоэнкодер на нормальных примерах;
-2. на инференсе считаем reconstruction error;
-3. по ошибке и выбранному методу калибровки получаем threshold:
-   - `kde_fpr` (default): KDE + целевой FPR на normal-val
-   - `mad`: median + k * MAD
-   - `quantile`: классический q-квантиль
-4. если ошибка выше порога, считаем сигнал аномальным.
-
-### 5. Метрики и анализ
-
-В проекте используются:
-
-- **AUC-ROC**
-- **pAUC**
-- `accuracy`
-- `F1`
-
-Также добавлен полезный диагностический лог:
-
-- `normal_error_mean`
-- `abnormal_error_mean`
-- `error_delta = abnormal - normal`
-
-Это помогает понять, реально ли модель разделяет норму и аномалию.
-
-### 6. Per-ID обучение
-
-Один из ключевых выводов проекта:
-
-- `id_00`, `id_02`, `id_04`, `id_06` — это не “каждый отдельный звук”, а **разные экземпляры одной и той же машины**;
-- для MIMII лучше обучать **отдельную модель на каждый `machine_id`**, а не одну общую на все ID.
-
-Примеры:
-
-- `fan/id_00` → отдельная модель
-- `fan/id_02` → отдельная модель
-- `fan/id_04` → отдельная модель
-- `fan/id_06` → отдельная модель
-
-### 7. История и версии моделей
-
-Реализовано:
-
-- реестр моделей: `models/model_registry.json`
-- история чекпоинтов: `models/history/`
-- хранение метаданных:
-  - `machine_type`
-  - `machine_id`
-  - `snr`
-  - `mode`
-  - `auc_roc`
-  - `pauc`
-  - `threshold`
-  - `epochs_trained`
-
-## Структура проекта
-
-```text
-app.py
-src/
-  autoencoder.py
-  dataset.py
-  evaluate.py
-  classifier.py
-  ocsvm.py
-  config.py
-templates/
-  index.html
-models/
-  history/
-  model_registry.json
-results/
-README.md
-CASE_2_Acoustic_Diagnostics.md
+```
+$ cd dataset/
+$ sh 7z.sh
+$ cd ..
 ```
 
-## Как запускать
+**7z.sh** only support Ubuntu 16.04 LTS and 18.04 LTS.
+If you use Windows or Cent OS, please edit the scripts.
 
-### Обычный запуск
+### 2. run baseline system
+
+```
+$ python3.6 baseline.py
+```
+DAE (Deep AutoEncoder) based anomaly detection will run.  
+**model/**, **pickle/**, and **result/** directories will be genetrated.  
+When you want to change the parameter, please edit **baseline.yaml**.
+
+- model/ :  
+	Training results are located.  
+- pickle/ :  
+  Snapshots of the dataset are located.  
+- result/ :  
+	.yaml file (default = result.yaml) is located.  
+	In the file, all result AUCs are written.
+
+### 3. sample result
+```yaml  
+fan_id_00_0dB:
+  AUC: 0.6339126707677076
+fan_id_00_6dB:
+  AUC: 0.7445864448321451
+fan_id_00_min6dB:
+  AUC: 0.5757112931560107
+fan_id_02_0dB:
+  AUC: 0.8564412132121879
+fan_id_02_6dB:
+  AUC: 0.9930556094381638
+fan_id_02_min6dB:
+  AUC: 0.6401486642716925
+fan_id_04_0dB:
+  AUC: 0.7304465583300304
+fan_id_04_6dB:
+  AUC: 0.8688647773814242
+fan_id_04_min6dB:
+  AUC: 0.5715005284713965
+fan_id_06_0dB:
+  AUC: 0.982144090361492
+fan_id_06_6dB:
+  ...
+```
+
+## Dependency
+
+We develop the source code on Ubuntu 16.04 LTS and 18.04 LTS.
+In addition, we checked performing on **Ubuntu 16.04 LTS**, **18.04 LTS**, **Cent OS 7**, and **Windows 10**.
+
+### Software packages
+- p7zip-full
+- Python == 3.6.5
+- FFmpeg
+
+### Python packages
+- Keras                         == 2.1.6
+- Keras-Applications            == 1.0.8
+- Keras-Preprocessing           == 1.0.5
+- matplotlib                    == 3.0.3
+- numpy                         == 1.16.0
+- PyYAML                        == 5.1
+- scikit-learn                  == 0.20.2
+- librosa                       == 0.6.0
+- audioread                     == 2.1.5 (more)
+- setuptools                    == 41.0.0
+- tensorflow                    == 1.15.0
+
+## Remote deploy (owner + friend)
+
+Public URL: `https://jeniffer-unsought-kyla.ngrok-free.dev`  
+Deploy token: `kj8f3h2k9s0d` (header `X-Deploy-Token`)
+
+**For the friend / agent (one sentence):** edit code → `git push origin main` → after ~1–2 minutes the owner's machine has the new code. Nothing else.
+
+If it still didn't update, call `/api/deploy` once:
 
 ```bash
-pip install -r requirements.txt
-python app.py
+curl -X POST "https://jeniffer-unsought-kyla.ngrok-free.dev/api/deploy" \
+  -H "Content-Type: application/json" \
+  -H "X-Deploy-Token: kj8f3h2k9s0d" \
+  -d '{"pull": true, "restart": true}'
 ```
-
-или через:
-
-- `start.bat`
-- `start_public.bat`
-
-После запуска:
-
-- открыть [http://127.0.0.1:228](http://127.0.0.1:228)
-
-### Dev-режим
-
-Для локальной разработки добавлены:
-
-- `dev_start.bat`
-- `dev_stop.bat`
-- `dev_restart.bat`
-
-`dev_start.bat` включает авто-релоад сервера при изменении кода.
-
-## Рекомендуемые настройки
-
-Стартовые настройки для `fan`:
-
-- `machine_id`: один конкретный (`id_00` / `id_02` / `id_04` / `id_06`)
-- `epochs = 60`
-- `batch_size = 128`
-- `learning_rate = 0.0003`
-- `patience = 10–15`
-- `anomaly_quantile = 0.995`
-- `threshold_method = kde_fpr`
-- `threshold_target_fpr = 0.05`
-- `threshold_mad_k = 3.0`
-
-Если цель — качество, лучше запускать:
-
-- `new`
-- на одном `machine_id`
-- без смешивания всех ID в одну модель
-
-## Что ещё есть в проекте
-
-- One-Class SVM baseline: `src/ocsvm.py`
-- Logistic Regression baseline: `src/ocsvm.py`
-- latent classifier: `src/classifier.py`
-
-Это вспомогательные модули, основной сценарий проекта сейчас построен вокруг автоэнкодера.
-
-## Источники и паттерны
-
-Использованные ориентиры:
-
-- MIMII Dataset: https://arxiv.org/abs/1909.09347
-- MIMII baseline: https://github.com/MIMII-hitachi/mimii_baseline
-- DCASE workshop paper: https://dcase.community/documents/workshop2019/proceedings/DCASE2019Workshop_Purohit_21.pdf
-- PyTorch tuning guide: https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html
-
-Архитектурные идеи, на которые опирались:
-
-- reconstruction-error anomaly detection;
-- file-level split без leakage;
-- per-domain/per-machine-id обучение;
-- depthwise separable conv pattern;
-- scheduler-based стабилизация обучения.
-
-## Краткий вывод
-
-Проект представляет собой рабочий прототип акустической диагностики:
-
-- есть обучение;
-- есть инференс;
-- есть история моделей;
-- есть per-ID модели;
-- есть настройка train-конфига через UI;
-- есть визуализация и базовые метрики качества.
-
-Основной practical insight проекта:
-
-> для MIMII качество очень зависит не только от архитектуры, но и от раздельного обучения по `machine_id` и честного split по файлам.
